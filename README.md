@@ -2,14 +2,14 @@
 
 ![](conveyare.jpg)
 
-Conveyare is a light routing library for messaging systems.
+Conveyare is a light routing library for [Kafka](https://kafka.apache.org) based micro-services.
 
 ## Installation
 
 Add the following dependency to your `project.clj` file:
 
 ```clj
-[ververve/conveyare "0.1.0"]
+[com.ververve/conveyare "0.1.0"]
 ```
 
 ## License
