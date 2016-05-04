@@ -1,4 +1,4 @@
-(defproject com.ververve/conveyare "0.1.0"
+(defproject com.ververve/conveyare "0.1.1"
   :description "A light routing library for Kafka"
   :url "http://github.com/ververve/conveyare"
   :license {:name "Apache License 2.0"
@@ -11,6 +11,4 @@
                  [prismatic/schema "1.1.0"]
                  [clout  "2.1.2"]
                  [camel-snake-kebab "0.3.2"]
-                 [spootnik/kinsky "0.1.8"]]
-  :main conveyare.core
-  )
+                 [spootnik/kinsky "0.1.8"]])
