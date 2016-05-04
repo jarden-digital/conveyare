@@ -11,4 +11,5 @@
                  [prismatic/schema "1.1.0"]
                  [clout  "2.1.2"]
                  [camel-snake-kebab "0.3.2"]
-                 [spootnik/kinsky "0.1.8"]])
+                 [spootnik/kinsky "0.1.8"]]
+  :deploy-repositories [["clojars" {:sign-releases false}]])
