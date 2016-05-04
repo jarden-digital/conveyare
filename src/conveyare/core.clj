@@ -49,7 +49,7 @@
 (def ^:private time-formatter
   (tf/formatters :date-time))
 
-(defn- send-message!
+(defn send-message!
   [uuid topic action data]
   (let [at (t/now)
         msg {:id (str uuid)
@@ -75,7 +75,7 @@
                           action (:action resp)
                           data (:data resp)]
                       (send-message! id topic action data)))]
-    (apply router/route-case clauses)))
+    (apply router/route-case publish-f clauses)))
 
 (defn accept
   ""

@@ -48,7 +48,7 @@
     (a/go ; drain and ignore control messages
           (loop [msg (a/<! pctl)]
             (when msg
-              (log/warn "Producer control" msg)
+              (log/info "Producer control" msg)
               (recur (a/<! pctl)))))
     (a/go ; drain records to producer channel as json
           (loop [record (a/<! msgs-out)]
@@ -68,13 +68,12 @@
   (let [servers (get conf :bootstrap.servers "localhost:9092")
         ops (get conf :consumer-ops {})
         [cdriver cchan cctl] (q.async/consume! (merge {:bootstrap.servers servers
-                                                       :group-id "conveyare-service"}
+                                                       :group.id "conveyare-service"}
                                                       ops)
                                                (q/string-deserializer)
                                                (q/string-deserializer)
                                                topic)
         msgs-in (a/chan)]
-    (log/info "Bootstrap servers " servers)
     (a/go ; drain incoming records from consumer change
           (loop [record (a/<! cchan)]
             (if record
@@ -93,12 +92,11 @@
     {:driver cdriver
      :chan msgs-in}))
 
-(defn start [opts]
-  (log/info "Starting transport" opts)
-  (let [kafka-conf (:transport opts)
-        producer (create-producer kafka-conf)
-        consumers (for [topic (keys (:topics opts))]
-                    [topic (create-consumer kafka-conf topic)])]
+(defn start [{:keys [transport topics]}]
+  (log/info "Starting transport" transport)
+  (let [producer (create-producer transport)
+        consumers (for [topic (keys topics)]
+                    [topic (create-consumer transport topic)])]
     {:up true
      :producer producer
      :topics (into {} consumers)}))

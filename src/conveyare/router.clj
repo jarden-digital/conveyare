@@ -60,10 +60,11 @@
 
 (defn start [opts transport]
   (let [topics (:topics opts)
-        publisher-chan (get-in transport [:publisher :chan])
         initial-inputs (into {}
                              (for [[topic router] topics]
-                               [(get-in transport [topic :chan]) router]))]
+                               [(get-in transport [:topics topic :chan]) router]))]
+    (when (pos? (count initial-inputs))
+      (log/info "Starting router for" (keys topics)))
     (non-daemon-thread
       (loop [inputs initial-inputs]
         (when (pos? (count inputs))
