@@ -1,5 +1,6 @@
 (ns conveyare.transport
-  (:require [clojure.core.async :as a]
+  (:require [conveyare.model :as model :refer [Message Record message-checker record-checker]]
+            [clojure.core.async :as a]
             [schema.core :as s]
             [clojure.tools.logging :as log]
             [kinsky.client :as q]
@@ -9,27 +10,7 @@
             [clj-time.coerce :as tc]
             [clj-time.format :as tf]
             [camel-snake-kebab.core :as csk]
-            [clojure.string :as string])
-  (:gen-class))
-
-; TODO break Message out to middleware
-
-(s/defschema Message
-  {:id s/Str
-   :time s/Str
-   :version s/Str
-   :user {:name s/Str}
-   :action s/Str
-   :data s/Any})
-
-(s/defschema Record
-  {:topic s/Str
-   :key s/Str
-   :value Message})
-
-(def message-checker (s/checker Message))
-
-(def record-checker (s/checker Record))
+            [clojure.string :as string]))
 
 (defn parse-msg [s]
   (when s
@@ -57,9 +38,9 @@
                     msg-json (json/generate-string (:value record) {:key-fn csk/->camelCaseString})]
                 (if (nil? checks)
                   (do
-                    (log/debug "Sending" (dissoc record :value))
+                    (log/debug "Sending" (model/describe-record record))
                     (a/>! pchan (assoc record :value msg-json)))
-                  (log/warn "Can't send invalid record" record checks)))
+                  (log/warn "Can't send invalid record" (model/describe-record record) checks)))
               (recur (a/<! msgs-out)))))
     {:driver pdriver
      :chan msgs-out}))
@@ -87,7 +68,7 @@
     (a/go ; drain and ignore control messages
           (loop [msg (a/<! cctl)]
             (when msg
-              (log/warn "Consumer control" topic "msg" msg)
+              (log/info "Consumer control" topic "msg" msg)
               (recur (a/<! cctl)))))
     {:driver cdriver
      :chan msgs-in}))
@@ -110,3 +91,8 @@
       (a/close! (:chan topic))
       (.stop! (:driver topic) 1000))
     (assoc this :up false)))
+
+(defn send-record! [this record]
+  (if-let [c (get-in this [:producer :chan])]
+    (a/>!! c record)
+    (log/error "Failed to send message, transport not available")))

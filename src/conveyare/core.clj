@@ -1,5 +1,6 @@
 (ns conveyare.core
-  (:require [conveyare.router :as router]
+  (:require [conveyare.model :as model]
+            [conveyare.router :as router]
             [conveyare.transport :as transport]
             [clojure.core.async :as a]
             [clojure.tools.logging :as log]
@@ -46,36 +47,17 @@
   []
   (:up @state))
 
-(def ^:private time-formatter
-  (tf/formatters :date-time))
-
 (defn send-message!
   [uuid topic action data]
-  (let [at (t/now)
-        msg {:id (str uuid)
-             :time (tf/unparse time-formatter at)
-             :version "0.1.0"
-             :user {:name "system"}
-             :action action
-             :data data}
-        record {:topic topic
-                :key action
-                :value msg}
-        c (get-in @state [:transport :producer :chan])]
-    (if c
-      (a/>!! c record)
-      (log/error "failed to send message, transport not available"))))
+  (let [record (model/record topic uuid action data)
+        t (:transport @state)]
+    (transport/send-record! t record)))
 
 (defn route-case
-  "Returns a router function, that takes a message"
+  "Creates a router function, that takes a Record and returns either
+  a Receipt if processed, or nil if not"
   [& clauses]
-  (let [publish-f (fn [resp]
-                    (let [id (:id resp)
-                          topic (:topic resp)
-                          action (:action resp)
-                          data (:data resp)]
-                      (send-message! id topic action data)))]
-    (apply router/route-case publish-f clauses)))
+  (apply router/route-case clauses))
 
 (defn accept
   ""
