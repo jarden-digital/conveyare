@@ -13,7 +13,7 @@
 
 (defn route-case [& clauses]
   (fn [record]
-    (when-not (model/record-checker record)
+    (when-not (model/message-checker (:value record))
       (let [value (:value record)
             id (:id value)
             action (:action value)
