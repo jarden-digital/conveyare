@@ -51,6 +51,29 @@
                   (model/failure :bad-request (str "Accept schema checks failed " checks)))
                 (recur more)))))))))
 
+(defn- action-matches [action-matcher message]
+  (let [action (:action message)
+        faux-request (assoc message :uri action)]
+    (when action
+      (clout/route-matches action-matcher faux-request))))
+
+(defn if-action [action-matcher handler]
+  (fn [message]
+    (if-let [params (action-matches action-matcher message)]
+      (handler (assoc message :params params)))))
+
+(defmacro endpoint [action args & body]
+  ;; available options: :summary :accept :to :return
+  (let [options (apply hash-map (drop-last body))
+        accept-schema (:accept options)
+        f (last body)]
+    `(#'if-action
+      ~(clout/route-compile action)
+      (fn [message#]
+        (when ~accept-schema
+          (println  (s/check ~accept-schema (:body message#))))
+        (let [~args message#] ~f)))))
+
 (defn accept [route & args]
   (let [options (apply hash-map (drop-last args))
         f (last args)]
@@ -58,6 +81,38 @@
       options
       {:route route
        :f f})))
+
+(defn- context-action [action]
+  (let [re-context {:__path-info #"|/.*"}]
+    (clout/route-compile (str action ":__path-info") re-context)))
+
+(defn- remove-suffix [path suffix]
+  (subs path 0 (- (count path) (count suffix))))
+
+(defn if-context [action-matcher handler]
+  (fn [message]
+    (when-let [params (action-matches action-matcher message)]
+      (let [action (:action message)
+            path (:path-info message action)
+            context (or (:context message) "")
+            subpath (:__path-info params)
+            params (dissoc params :__path-info)]
+        (handler
+         (assoc message
+                :params params
+                :path-info (if (= subpath "") "/" subpath)
+                :context (remove-suffix action subpath)))))))
+
+(defn routing
+  [message & handlers]
+  (some #(% message) handlers))
+
+(defmacro context [actionp args & routes]
+  `(#'if-context
+    ~(context-action actionp)
+    (fn [message#]
+      (let [~args message#]
+        (routing message# ~@routes)))))
 
 (defmacro non-daemon-thread [& body]
   `(.start (Thread. (fn [] ~@body))))

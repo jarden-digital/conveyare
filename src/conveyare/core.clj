@@ -21,7 +21,9 @@
 (defonce ^:private state
   (atom {}))
 
-; pass in map topic to route function
+; middleware - deserialise, serialise, extract action
+; via middleware
+
 (defn start
   "Start conveyare system."
   [& opts]
