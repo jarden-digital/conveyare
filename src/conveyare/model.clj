@@ -3,8 +3,6 @@
             [clj-time.core :as t]
             [clj-time.format :as tf]))
 
-; TODO break Message out to middleware
-
 (s/defschema Record
   {:topic s/Str
    :key s/Str

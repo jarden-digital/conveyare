@@ -62,22 +62,23 @@
     (if-let [params (action-matches action-matcher message)]
       (handler (assoc message :params params)))))
 
-(defn accept-schema [options]
-  (or (:accept options)
-      s/Any))
+(defn checker-for-option [option options]
+  (s/checker
+   (get options option s/Any)))
 
 (defmacro endpoint [action args & body]
   ;; available options: :summary :accept :to :return
   (let [options (apply hash-map (drop-last body))
         f (last body)]
-    `(let [accept-checker# (s/checker (accept-schema ~options))]
+    `(let [accept-checker# (checker-for-option :accept ~options)
+           return-checker# (checker-for-option :return ~options)]
        (if-action
         ~(clout/route-compile action)
         (fn [message#]
           (let [~args message#
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
-              (str "accept-failed")
+              (model/failure :bad-request (pr-str accept-problems#))
               ~f)))))))
 
 (defn accept [route & args]
@@ -114,7 +115,7 @@
   (some #(% message) handlers))
 
 (defmacro context [actionp args & routes]
-  `(#'if-context
+  `(if-context
     ~(context-action actionp)
     (fn [message#]
       (let [~args message#]
