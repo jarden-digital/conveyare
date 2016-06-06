@@ -66,6 +66,11 @@
   (s/checker
    (get options option s/Any)))
 
+(defn receipted [val]
+  (if (model/receipt-checker val)
+    (model/ok [val])
+    val))
+
 (defmacro endpoint [action args & body]
   ;; available options: :summary :accept :to :return
   (let [options (apply hash-map (drop-last body))
@@ -79,8 +84,11 @@
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
               (model/failure :bad-request (pr-str accept-problems#))
-              (let [res# ~f
-                    return-problems# (return-checker# res#)]
+              (let [res# (try (receipted ~f)
+                              (catch Exception ex#
+                                (model/exception :internal-error "Exception occured" ex#)))
+                    return-problems# (when (= :ok (:status res#))
+                                              (return-checker# (first (:output res#))))]
                 (if return-problems#
                   (model/failure :internal-error (pr-str return-problems#))
                   res#)))))))))
