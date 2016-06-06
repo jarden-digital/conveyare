@@ -71,6 +71,17 @@
     (model/ok [val])
     val))
 
+(defmacro do-receipted [form]
+  `(try (receipted ~form)
+        (catch Exception ex#
+          (model/exception :internal-error "Exception occured" ex#))))
+
+(defn receipt-output-check [checker {status :status output :output}]
+  (when (= :ok status)
+    (reduce (fn [_ o]
+              (when-let [problem (checker o)]
+                (reduced problem))) nil output)))
+
 (defmacro endpoint [action args & body]
   ;; available options: :summary :accept :to :return
   (let [options (apply hash-map (drop-last body))
@@ -84,11 +95,8 @@
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
               (model/failure :bad-request (pr-str accept-problems#))
-              (let [res# (try (receipted ~f)
-                              (catch Exception ex#
-                                (model/exception :internal-error "Exception occured" ex#)))
-                    return-problems# (when (= :ok (:status res#))
-                                              (return-checker# (first (:output res#))))]
+              (let [res# (do-receipted ~f)
+                    return-problems# (receipt-output-check return-checker# res#)]
                 (if return-problems#
                   (model/failure :internal-error (pr-str return-problems#))
                   res#)))))))))
