@@ -79,7 +79,11 @@
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
               (model/failure :bad-request (pr-str accept-problems#))
-              ~f)))))))
+              (let [res# ~f
+                    return-problems# (return-checker# res#)]
+                (if return-problems#
+                  (model/failure :internal-error (pr-str return-problems#))
+                  res#)))))))))
 
 (defn accept [route & args]
   (let [options (apply hash-map (drop-last args))
