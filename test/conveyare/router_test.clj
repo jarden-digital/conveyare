@@ -65,10 +65,28 @@
                     (x {:action "/author/jane"
                         :body {:foo 0}})))))
 
-;TODO test reply within other forms, e.g. when
-;TODO test nil return from form still gets to :processing :receipt
+(deftest reply-or-not-and-also-nil-return
+  (let [x (r/endpoint "/order/:id/add" {{id :id} :params}
+                      (case id
+                        "48" (r/reply 1)
+                        "12" nil))]
+    (is (= {:status :ok
+            :output [{:topic "order-machine"
+                      :action "/order/48/add"
+                      :value 1}]}
+           (x {:topic "order-machine"
+               :action "/order/48/add"
+               :body {:item "pants" :quant 89}})))
+    (is (= {:status :processed :output []}
+           (x {:topic "order-machine"
+               :action "/order/12/add"
+               :body {:item "pants" :quant 89}})))
+    (is-exception :internal-error IllegalArgumentException
+           (x {:topic "order-machine"
+               :action "/order/111/add"
+               :body {:item "pants" :quant 89}}))))
 
-(deftest reply
+(deftest reply-with-all-options
   (let [order-add (fn [_ {q :quant}] {:total (inc q)})
         x (r/endpoint "/order/:id/add" {{id :id} :params
                                         order-line :body}
