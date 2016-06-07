@@ -5,18 +5,10 @@
 
 ; TODO break Message out to middleware
 
-(s/defschema Message
-  {:id s/Str
-   :time s/Str
-   :version s/Str
-   :user {:name s/Str}
-   :action s/Str
-   :data s/Any})
-
 (s/defschema Record
   {:topic s/Str
    :key s/Str
-   :value Message})
+   :value s/Any})
 
 (s/defschema Receipt
   {:status (s/enum :ok :accepted :processed
@@ -26,9 +18,12 @@
    ;:input Record
    :output [Record]})
 
-(def message-checker (s/checker Message))
+(s/defschema BaseRecord
+  {:topic s/Str
+   :key s/Str
+   :value s/Str})
 
-(def record-checker (s/checker Record))
+(def record-checker (s/checker RecordBase))
 
 (def receipt-checker (s/checker Receipt))
 
@@ -71,5 +66,5 @@
    :exception ex
    :output []})
 
-(defn describe-record [record]
-  (str (:topic record) " >> " (get-in record [:value :action])))
+(defn describe-record [{topic :topic key :key}]
+  (str topic " >> " key))

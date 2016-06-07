@@ -9,6 +9,8 @@
 
 (def default-opts
   {:topics {}
+   :middleware {:in #'identity
+                :out #'identity}
    :transport {:bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
@@ -48,9 +50,8 @@
   (:up @state))
 
 (defn send-message!
-  [uuid topic action data]
-  (let [record (model/record topic uuid action data)
-        t (:transport @state)]
+  [record]
+  (let [t (:transport @state)]
     (transport/send-record! t record)))
 
 (defn route-case
