@@ -4,6 +4,8 @@
             [conveyare.transport :as transport]
             [clojure.core.async :as a]
             [clojure.tools.logging :as log]
+            [cheshire.core :as json]
+            [camel-snake-kebab.core :as csk]
             [clj-time.core :as t]
             [clj-time.format :as tf]))
 
@@ -63,3 +65,20 @@
   ""
   [route & args]
   (apply router/accept route args))
+
+;; example middleware
+
+(defn wrap-json-middleware [handler]
+  (fn [record]
+    (let [parse (fn [s]
+                  (when s
+                      (try
+                        (json/parse-string s true)
+                        (catch java.io.IOException e nil))))
+          gen (fn [v]
+                (json/generate-string v {:key-fn csk/->camelCaseString}))
+          record (update record :value parse)
+          record (assoc record :action (get-in record [:value :action]))
+          receipt (handler record)
+          receipt (update receipt :value gen)]
+      receipt)))
