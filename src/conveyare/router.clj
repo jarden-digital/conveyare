@@ -11,46 +11,6 @@
 ; TODO generate documentation from this
 ; TODO make routes more performant by compiling schema checks etc upfront
 
-;; (defn route-case [& clauses]
-;;   (fn [record]
-;;     (when-not (model/message-checker (:value record))
-;;       (let [value (:value record)
-;;             id (:id value)
-;;             action (:action value)
-;;             data (:data value)
-;;             faux-request {:uri action}]
-;;         (loop [[c & more] clauses]
-;;           (when c
-;;             (let [route (:route c)
-;;                   schema (get c :accept s/Any)
-;;                   f (:f c)
-;;                   match (clout/route-matches route faux-request)
-;;                   checks (s/check schema data)]
-;;               (if match
-;;                 (if (nil? checks)
-;;                   (try
-;;                     (let [value-with-params (assoc value :params match)
-;;                           result (f value-with-params)
-;;                           schema (:return c)
-;;                           to-topic (:to c)
-;;                           checks (when schema (s/check schema result))]
-;;                       (if (nil? checks)
-;;                         (if to-topic
-;;                           (model/ok
-;;                             (model/record to-topic
-;;                                           id
-;;                                           "/api-gateway/response/success"
-;;                                           result))
-;;                           (model/status :processed))
-;;                         (model/failure :internal-error
-;;                                        (str "Return schema checks failed " checks))))
-;;                     (catch Exception e
-;;                       (model/exception :internal-error
-;;                                        "Exception occured"
-;;                                        e)))
-;;                   (model/failure :bad-request (str "Accept schema checks failed " checks)))
-;;                 (recur more)))))))))
-
 (defn- action-matches [action-matcher message]
   (let [action (:action message)
         faux-request (assoc message :uri action)]
@@ -179,23 +139,21 @@
 
 (defn start [opts transport]
   (let [topics (:topics opts)
-        initial-inputs (into {}
-                             (for [[topic router] topics]
-                               [(get-in transport [:topics topic :chan]) router]))]
-    (when (pos? (count initial-inputs))
-      (log/info "Starting router for" (keys topics)))
+        handler (:handler opts)
+        initial-cs (for [topic topics]
+                     (get-in transport [:topics topic :chan]))]
+    (when (pos? (count initial-cs))
+      (log/info "Starting router for" topics))
     (non-daemon-thread
-      (loop [inputs initial-inputs]
-        (when (pos? (count inputs))
-          (let [cs (keys inputs)
-                [r c] (a/alts!! cs)]
-            (if (nil? r)
-              (recur (dissoc inputs c))
-              (do
-                (log/debug "Received" (model/describe-record r))
-                (when-let [router (get inputs c)]
-                  (process-receipt transport r (router r)))
-                (recur inputs)))))))
+     (loop [cs initial-cs]
+       (when (pos? (count cs))
+         (let [[r c] (a/alts!! cs)]
+           (if (nil? r)
+             (recur (dissoc cs c))
+             (do
+               (log/debug "Received" (model/describe-record r))
+               (process-receipt transport r (handler r))
+               (recur cs)))))))
     {:up true}))
 
 (defn stop [router]

@@ -22,12 +22,12 @@
    (s/optional-key :exception) Exception
    :output [OutputRecord]})
 
-(s/defschema BaseRecord
+(s/defschema TransportRecord
   {:topic s/Str
-   :key s/Str
+   (s/optional-key :key) s/Str
    :value s/Str})
 
-(def record-checker (s/checker BaseRecord))
+(def record-checker (s/checker TransportRecord))
 
 (def receipt-checker (s/checker Receipt))
 

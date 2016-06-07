@@ -8,21 +8,18 @@
             [clj-time.format :as tf]))
 
 (def default-opts
-  {:topics {}
-   :middleware {:in #'identity
-                :out #'identity}
+  {:topics []
+   :handler nil ; wrapped in middleware
    :transport {:bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
                               :max.request.size 5000000}}})
 
-; TODO topics passed to kafka can be determined by routes created
+; TODO topics are implicit from handler definition?
+; TODO different topics have different middleware? middleware can detect that anyway
 
 (defonce ^:private state
   (atom {}))
-
-; middleware - deserialise, serialise, extract action
-; via middleware
 
 (defn start
   "Start conveyare system."
