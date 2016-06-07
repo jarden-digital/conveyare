@@ -6,9 +6,6 @@
             [clojure.tools.logging :as log]
             [clout.core :as clout]))
 
-(defprotocol Processor
-  (process [this record]))
-
 ; TODO check param schema
 ; TODO route summary
 ; TODO generate documentation from this
@@ -98,11 +95,7 @@
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
               (model/failure :bad-request (pr-str accept-problems#))
-              (try-receipted
-               (let [res# ~f]
-                 (if (satisfies? Processor res#)
-                   (process res# message#)
-                   res#))))))))))
+              (try-receipted ~f))))))))
 
 (defn accept [route & args]
   (let [options (apply hash-map (drop-last args))
@@ -147,20 +140,24 @@
 (defmacro reply [& body]
   (let [options (apply hash-map (drop-last body))
         f (last body)]
-    ; TODO verify how many times checker is compiled
-    `(let [checker# (checker-for-option :accept ~options)]
-       (reify Processor
-         (process [this# record#]
-           (let [action# (get ~options :action (:action record#))
-                 topic# (get ~options :to (:topic record#))
-                 res# (receipted ~f
-                                 (fn [val#] (model/ok [{:action action#
-                                                        :topic topic#
-                                                        :value val#}])))
-                 problems# (receipt-output-check checker# res#)]
-             (if problems#
-               (model/failure :internal-error (pr-str problems#))
-               res#)))))))
+    ; TODO checker compilation here is pointless, as the macro expansion doesn't 'cache' it
+    `(let [checker# (checker-for-option :accept ~options)
+           action# (get ~options :action)
+           topic# (get ~options :to)
+           ; TODO check there is only a single output
+           res# (receipted ~f
+                           (fn [val#]
+                             (model/ok [{:value val#}])))
+           res# (update res# :output
+                        (fn [os#]
+                          (map #(merge %
+                                       (when action# {:action action#})
+                                       (when topic# {:topic topic#}))
+                               os#)))
+           problems# (receipt-output-check checker# res#)]
+       (if problems#
+         (model/failure :internal-error (pr-str problems#))
+         res#))))
 
 (defmacro non-daemon-thread [& body]
   `(.start (Thread. (fn [] ~@body))))

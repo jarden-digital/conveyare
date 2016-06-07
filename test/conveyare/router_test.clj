@@ -71,9 +71,7 @@
                         "48" (r/reply 1)
                         "12" nil))]
     (is (= {:status :ok
-            :output [{:topic "order-machine"
-                      :action "/order/48/add"
-                      :value 1}]}
+            :output [{:value 1}]}
            (x {:topic "order-machine"
                :action "/order/48/add"
                :body {:item "pants" :quant 89}})))

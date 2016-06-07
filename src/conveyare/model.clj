@@ -9,13 +9,18 @@
    :action s/Str
    :value s/Any})
 
+(s/defschema OutputRecord
+  {(s/optional-key :topic) s/Str
+   (s/optional-key :key) s/Str
+   (s/optional-key :action) s/Str
+   :value s/Any})
+
 (s/defschema Receipt
   {:status (s/enum :ok :accepted :processed
                    :bad-request :internal-error)
    (s/optional-key :description) s/Str
    (s/optional-key :exception) Exception
-   ;:input Record
-   :output [Record]})
+   :output [OutputRecord]})
 
 (s/defschema BaseRecord
   {:topic s/Str

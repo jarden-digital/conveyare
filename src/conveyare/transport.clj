@@ -36,7 +36,7 @@
       (loop [record (a/<! msgs-out)]
         (when record
           (let [record (down-convert middleware record)
-                checks (record-checker record)]
+                checks (record-checker record)] ;TODO check for protocol level record
             (if (nil? checks)
               (do
                 (log/debug "Sending" (model/describe-record record))
