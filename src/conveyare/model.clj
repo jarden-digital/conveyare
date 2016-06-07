@@ -5,7 +5,8 @@
 
 (s/defschema Record
   {:topic s/Str
-   :key s/Str
+   (s/optional-key :key) s/Str
+   :action s/Str
    :value s/Any})
 
 (s/defschema Receipt
@@ -21,7 +22,7 @@
    :key s/Str
    :value s/Str})
 
-(def record-checker (s/checker RecordBase))
+(def record-checker (s/checker BaseRecord))
 
 (def receipt-checker (s/checker Receipt))
 

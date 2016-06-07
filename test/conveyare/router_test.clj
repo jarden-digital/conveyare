@@ -31,19 +31,15 @@
       (is (= nil
              (x {:action "/product/b1?foo=bar"}))))
     (testing "matching no arg action"
-      (is (= {:status :ok
-              :output ["uuu"]}
+      (is (= {:status :processed :output []}
              (y {:action "/user"}))))
     (testing "matching action"
-      (is (= {:status :ok
-              :output ["<>soup"]}
+      (is (= {:status :processed :output []}
              (x {:action "/product/soup"})))
-      (is (= {:status :ok
-              :output ["<>b1"]}
+      (is (= {:status :processed :output []}
              (x {:action "/product/b1"}))))
     (testing "body extraction"
-      (is (= {:status :ok
-              :output [{:q "42" :done true}]}
+      (is (= {:status :processed :output []}
              (z {:action "/job"
                  :body {:q "42"}}))))))
 
@@ -51,13 +47,11 @@
   (let [x (r/endpoint "/author/:n" {{n :n} :params}
                       :summary "Get author"
                       :accept {:foo s/Num}
-                      :return {:bar s/Str}
                       (case n
                         "bob" {:bar (str "?bob")}
                         "john" false))]
     (testing "happy case"
-      (is (= {:status :ok
-              :output [{:bar "?bob"}]}
+      (is (= {:status :processed :output []}
              (x {:action "/author/bob"
                  :body {:foo 456}}))))
     (testing "accept schema"
@@ -66,25 +60,38 @@
               :output []}
              (x {:action "/author/sue"
                  :body {:foo "hi"}}))))
-    (testing "return schema"
-      (is (= {:status :internal-error
-              :description "(not (map? false))"
-              :output []}
-             (x {:action "/author/john"
-                 :body {:foo 12}}))))
     (testing "exception"
       (is-exception :internal-error IllegalArgumentException
                     (x {:action "/author/jane"
                         :body {:foo 0}})))))
+
+;TODO test reply within other forms, e.g. when
+;TODO test nil return from form still gets to :processing :receipt
+
+(deftest reply
+  (let [order-add (fn [_ {q :quant}] {:total (inc q)})
+        x (r/endpoint "/order/:id/add" {{id :id} :params
+                                        order-line :body}
+                      :accept {:item s/Str
+                               :quant s/Num}
+                      (r/reply :to "orders-topic" ; optional, default to originating topic
+                               :action (str "/order/" id "/accepted") ; optional, default to originating action
+                               :accept {:total s/Num} ; optional check
+                               (order-add id order-line)))]
+    (is (= {:status :ok
+            :output [{:topic "orders-topic"
+                      :action "/order/48/accepted"
+                      :value {:total 90}}]}
+           (x {:topic "order-machine"
+               :action "/order/48/add"
+               :body {:item "pants" :quant 89}})))))
 
 (deftest router-context
   (let [x (r/context "/product/:pid" {{pid :pid} :params}
             (r/endpoint "/add" _ (str "a|" pid))
             (r/endpoint "/push/:sub" {{sub :sub} :params} (str "b|" pid "|" sub)))]
     (testing "matching actions"
-      (is (= {:status :ok
-              :output ["a|cheese"]}
+      (is (= {:status :processed :output []}
              (x {:action "/product/cheese/add"})))
-      (is (= {:status :ok
-              :output ["b|cheese|mild"]}
+      (is (= {:status :processed :output []}
              (x {:action "/product/cheese/push/mild"}))))))

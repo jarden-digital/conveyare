@@ -6,50 +6,53 @@
             [clojure.tools.logging :as log]
             [clout.core :as clout]))
 
+(defprotocol Processor
+  (process [this record]))
+
 ; TODO check param schema
 ; TODO route summary
 ; TODO generate documentation from this
 ; TODO make routes more performant by compiling schema checks etc upfront
 
-(defn route-case [& clauses]
-  (fn [record]
-    (when-not (model/message-checker (:value record))
-      (let [value (:value record)
-            id (:id value)
-            action (:action value)
-            data (:data value)
-            faux-request {:uri action}]
-        (loop [[c & more] clauses]
-          (when c
-            (let [route (:route c)
-                  schema (get c :accept s/Any)
-                  f (:f c)
-                  match (clout/route-matches route faux-request)
-                  checks (s/check schema data)]
-              (if match
-                (if (nil? checks)
-                  (try
-                    (let [value-with-params (assoc value :params match)
-                          result (f value-with-params)
-                          schema (:return c)
-                          to-topic (:to c)
-                          checks (when schema (s/check schema result))]
-                      (if (nil? checks)
-                        (if to-topic
-                          (model/ok
-                            (model/record to-topic
-                                          id
-                                          "/api-gateway/response/success"
-                                          result))
-                          (model/status :processed))
-                        (model/failure :internal-error
-                                       (str "Return schema checks failed " checks))))
-                    (catch Exception e
-                      (model/exception :internal-error
-                                       "Exception occured"
-                                       e)))
-                  (model/failure :bad-request (str "Accept schema checks failed " checks)))
-                (recur more)))))))))
+;; (defn route-case [& clauses]
+;;   (fn [record]
+;;     (when-not (model/message-checker (:value record))
+;;       (let [value (:value record)
+;;             id (:id value)
+;;             action (:action value)
+;;             data (:data value)
+;;             faux-request {:uri action}]
+;;         (loop [[c & more] clauses]
+;;           (when c
+;;             (let [route (:route c)
+;;                   schema (get c :accept s/Any)
+;;                   f (:f c)
+;;                   match (clout/route-matches route faux-request)
+;;                   checks (s/check schema data)]
+;;               (if match
+;;                 (if (nil? checks)
+;;                   (try
+;;                     (let [value-with-params (assoc value :params match)
+;;                           result (f value-with-params)
+;;                           schema (:return c)
+;;                           to-topic (:to c)
+;;                           checks (when schema (s/check schema result))]
+;;                       (if (nil? checks)
+;;                         (if to-topic
+;;                           (model/ok
+;;                             (model/record to-topic
+;;                                           id
+;;                                           "/api-gateway/response/success"
+;;                                           result))
+;;                           (model/status :processed))
+;;                         (model/failure :internal-error
+;;                                        (str "Return schema checks failed " checks))))
+;;                     (catch Exception e
+;;                       (model/exception :internal-error
+;;                                        "Exception occured"
+;;                                        e)))
+;;                   (model/failure :bad-request (str "Accept schema checks failed " checks)))
+;;                 (recur more)))))))))
 
 (defn- action-matches [action-matcher message]
   (let [action (:action message)
@@ -66,28 +69,28 @@
   (s/checker
    (get options option s/Any)))
 
-(defn receipted [val]
+(defn receipted [val receiptf]
   (if (model/receipt-checker val)
-    (model/ok [val])
+    (receiptf val)
     val))
 
-(defmacro do-receipted [form]
-  `(try (receipted ~form)
+(defmacro try-receipted [form]
+  `(try (receipted ~form
+                   (fn [val#] (model/status :processed)))
         (catch Exception ex#
           (model/exception :internal-error "Exception occured" ex#))))
 
 (defn receipt-output-check [checker {status :status output :output}]
   (when (= :ok status)
-    (reduce (fn [_ o]
-              (when-let [problem (checker o)]
+    (reduce (fn [_ {value :value}]
+              (when-let [problem (checker value)]
                 (reduced problem))) nil output)))
 
 (defmacro endpoint [action args & body]
   ;; available options: :summary :accept :to :return
   (let [options (apply hash-map (drop-last body))
         f (last body)]
-    `(let [accept-checker# (checker-for-option :accept ~options)
-           return-checker# (checker-for-option :return ~options)]
+    `(let [accept-checker# (checker-for-option :accept ~options)]
        (if-action
         ~(clout/route-compile action)
         (fn [message#]
@@ -95,11 +98,11 @@
                 accept-problems# (accept-checker# (:body message#))]
             (if accept-problems#
               (model/failure :bad-request (pr-str accept-problems#))
-              (let [res# (do-receipted ~f)
-                    return-problems# (receipt-output-check return-checker# res#)]
-                (if return-problems#
-                  (model/failure :internal-error (pr-str return-problems#))
-                  res#)))))))))
+              (try-receipted
+               (let [res# ~f]
+                 (if (satisfies? Processor res#)
+                   (process res# message#)
+                   res#))))))))))
 
 (defn accept [route & args]
   (let [options (apply hash-map (drop-last args))
@@ -140,6 +143,24 @@
     (fn [message#]
       (let [~args message#]
         (routing message# ~@routes)))))
+
+(defmacro reply [& body]
+  (let [options (apply hash-map (drop-last body))
+        f (last body)]
+    ; TODO verify how many times checker is compiled
+    `(let [checker# (checker-for-option :accept ~options)]
+       (reify Processor
+         (process [this# record#]
+           (let [action# (get ~options :action (:action record#))
+                 topic# (get ~options :to (:topic record#))
+                 res# (receipted ~f
+                                 (fn [val#] (model/ok [{:action action#
+                                                        :topic topic#
+                                                        :value val#}])))
+                 problems# (receipt-output-check checker# res#)]
+             (if problems#
+               (model/failure :internal-error (pr-str problems#))
+               res#)))))))
 
 (defmacro non-daemon-thread [& body]
   `(.start (Thread. (fn [] ~@body))))
