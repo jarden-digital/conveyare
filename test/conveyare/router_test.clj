@@ -15,7 +15,7 @@
 ;; TODO is the to address based on route or response (or optionally either)?
 
 (deftest endpoint
-  (let [x (r/endpoint "/product/:pid" {{pid :pid} :params} (str "<>" pid))
+  (let [x (r/endpoint "/product/:pid" {{pid :pid} :params} (r/reply (str "<>" pid)))
         y (r/endpoint "/user" _ (str "uuu"))
         z (r/endpoint "/job" {body :body} (assoc body :done true))]
     (testing "bad msg container"
@@ -34,9 +34,11 @@
       (is (= {:status :processed :output []}
              (y {:action "/user"}))))
     (testing "matching action"
-      (is (= {:status :processed :output []}
+      (is (= {:status :ok
+              :output [{:value "<>soup"}]}
              (x {:action "/product/soup"})))
-      (is (= {:status :processed :output []}
+      (is (= {:status :ok
+              :output [{:value "<>b1"}]}
              (x {:action "/product/b1"}))))
     (testing "body extraction"
       (is (= {:status :processed :output []}
@@ -48,10 +50,11 @@
                       :summary "Get author"
                       :accept {:foo s/Num}
                       (case n
-                        "bob" {:bar (str "?bob")}
+                        "bob" (r/reply {:bar (str "?bob")})
                         "john" false))]
     (testing "happy case"
-      (is (= {:status :processed :output []}
+      (is (= {:status :ok
+              :output [{:value {:bar "?bob"}}]}
              (x {:action "/author/bob"
                  :body {:foo 456}}))))
     (testing "accept schema"
