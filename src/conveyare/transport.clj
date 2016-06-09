@@ -15,7 +15,7 @@
 (defn parse-msg [s]
   (when s
     (try
-      (json/parse-string s true)
+      (json/parse-string-strict s true)
       (catch java.io.IOException e nil))))
 
 (defn create-producer [conf]
