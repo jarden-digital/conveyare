@@ -15,8 +15,11 @@
 (defn parse-msg [s]
   (when s
     (try
-      (json/parse-string-strict s true)
-      (catch java.io.IOException e nil))))
+      (json/parse-stream
+       (java.io.BufferedReader.
+        (java.io.StringReader. s))
+       true)
+      (catch Exception e nil))))
 
 (defn create-producer [conf]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
