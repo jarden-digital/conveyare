@@ -55,16 +55,17 @@
         msgs-in (a/chan)]
     (a/go ; drain incoming records from consumer change
           (loop [record (a/<! cchan)]
-            (if record
-              (try
-                (let [msg (parse-msg (:value record))
-                      checks (message-checker msg)]
-                  (if (nil? checks)
-                    (a/>! msgs-in (assoc record :value msg))
-                    (log/warn "Ignoring invalid record" record checks)))
-                (catch Exception e (log/error "Exception occured processing" record e))
-                (finally (recur (a/<! cchan))))
-              (a/close! msgs-in))))
+            (if-not record
+              (a/close! msgs-in)
+              (do
+                (try
+                  (let [msg (parse-msg (:value record))
+                        checks (message-checker msg)]
+                    (if (nil? checks)
+                      (a/>! msgs-in (assoc record :value msg))
+                      (log/warn "Ignoring invalid record" record checks)))
+                  (catch Exception e (log/error "Exception occured processing" record e)))
+                (recur (a/<! cchan))))))
     (a/go ; drain and ignore control messages
           (loop [msg (a/<! cctl)]
             (when msg
