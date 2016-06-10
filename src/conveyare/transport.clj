@@ -14,12 +14,7 @@
 
 (defn parse-msg [s]
   (when s
-    (try
-      (json/parse-stream
-       (java.io.BufferedReader.
-        (java.io.StringReader. s))
-       true)
-      (catch Exception e nil))))
+    (json/parse-string s true)))
 
 (defn create-producer [conf]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
@@ -61,12 +56,14 @@
     (a/go ; drain incoming records from consumer change
           (loop [record (a/<! cchan)]
             (if record
-              (let [msg (parse-msg (:value record))
-                    checks (message-checker msg)]
-                (if (nil? checks)
-                  (a/>! msgs-in (assoc record :value msg))
-                  (log/warn "Ignoring invalid record" record checks))
-                (recur (a/<! cchan)))
+              (try
+                (let [msg (parse-msg (:value record))
+                      checks (message-checker msg)]
+                  (if (nil? checks)
+                    (a/>! msgs-in (assoc record :value msg))
+                    (log/warn "Ignoring invalid record" record checks)))
+                (catch Exception e (log/error "Exception occured processing" record e))
+                (finally (recur (a/<! cchan))))
               (a/close! msgs-in))))
     (a/go ; drain and ignore control messages
           (loop [msg (a/<! cctl)]
