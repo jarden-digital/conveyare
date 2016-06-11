@@ -9,7 +9,7 @@ Conveyare is a light routing library for [Kafka](https://kafka.apache.org) based
 Add the following dependency to your `project.clj` file:
 
 ```clj
-[com.ververve/conveyare "0.1.0"]
+[com.ververve/conveyare "0.3.0"]
 ```
 
 ## Usage
