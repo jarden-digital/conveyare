@@ -5,9 +5,6 @@
             [clojure.tools.logging :as log]
             [kinsky.client :as q]
             [kinsky.async :as q.async]
-            [clj-time.core :as t]
-            [clj-time.coerce :as tc]
-            [clj-time.format :as tf]
             [clojure.string :as string]))
 
 (defn create-producer [conf]

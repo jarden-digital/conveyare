@@ -114,3 +114,38 @@
              (x {:action "/product/cheese/add"})))
       (is (= {:status :processed :output []}
              (x {:action "/product/cheese/push/mild"}))))))
+
+(deftest router-routes
+  (let [x (r/routes
+            (r/context "/a" _
+                (r/endpoint "/b" _
+                            (r/reply "yes")))
+            (r/context "/c" _
+                (r/endpoint "/d" _
+                            (r/reply "no")))
+            (r/endpoint "/e" _
+                        (r/reply "maybe")))]
+    (testing "good endpoints"
+      (is (= {:status :ok
+              :output [{:value "no"}]}
+             (x {:topic "topic-1"
+                 :action "/c/d"
+                 :body {}})))
+      (is (= {:status :ok
+              :output [{:value "maybe"}]}
+             (x {:topic "topic-2"
+                 :action "/e"
+                 :body {}}))))
+    (testing "non endpoints"
+      (is (= nil
+             (x {:topic "topic-1"
+                 :action "/f"
+                 :body {}})))
+      (is (= nil
+             (x {:topic "topic-2"
+                 :action "/a/z"
+                 :body {}})))
+      (is (= nil
+             (x {:topic "topic-3"
+                 :action "/a/b/i"
+                 :body {}}))))))

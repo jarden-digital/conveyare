@@ -89,6 +89,10 @@
       (let [~args message#]
         (routing message# ~@routes)))))
 
+(defmacro routes [& routes]
+  `(fn [message#]
+     (routing message# ~@routes)))
+
 (defmacro reply [& body]
   (let [options (apply hash-map (drop-last body))
         f (last body)]
@@ -127,7 +131,8 @@
       :bad-request (log/warn "Bad request" (model/describe-record input-record) (:description receipt))
       :internal-error (if-let [e (:exception receipt)]
                         (log/error "Internal error" (model/describe-record input-record) (:description receipt) e)
-                        (log/error "Internal error" (model/describe-record input-record) (:description receipt))))))
+                        (log/error "Internal error" (model/describe-record input-record) (:description receipt)))
+      (log/error "Internal error, unexpected receipt" receipt))))
 
 (defn start [opts transport]
   (let [topics (:topics opts)
@@ -143,7 +148,6 @@
            (if (nil? r)
              (recur (dissoc cs c))
              (do
-               (println ">>>>>")
                (log/debug "Received" (model/describe-record r))
                (process-receipt transport r (handler r))
                (recur cs)))))))
