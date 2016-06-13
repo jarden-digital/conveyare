@@ -57,14 +57,6 @@
               (model/failure :bad-request (pr-str accept-problems#))
               (try-receipted ~f))))))))
 
-(defn accept [route & args]
-  (let [options (apply hash-map (drop-last args))
-        f (last args)]
-    (merge
-      options
-      {:route route
-       :f f})))
-
 (defn- context-action [action]
   (let [re-context {:__path-info #"|/.*"}]
     (clout/route-compile (str action ":__path-info") re-context)))
@@ -151,6 +143,7 @@
            (if (nil? r)
              (recur (dissoc cs c))
              (do
+               (println ">>>>>")
                (log/debug "Received" (model/describe-record r))
                (process-receipt transport r (handler r))
                (recur cs)))))))

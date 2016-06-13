@@ -26,12 +26,15 @@
     (a/go ; drain records to producer channel
       (loop [record (a/<! msgs-out)]
         (when record
-          (let [checks (record-checker record)]
-            (if (nil? checks)
-              (do
-                (log/debug "Sending" (model/describe-record record))
-                (a/>! pchan record))
-              (log/warn "Can't send invalid record" (model/describe-record record) checks)))
+          (try
+            (let [checks (record-checker record)]
+              (if (nil? checks)
+                (do
+                  (log/debug "Sending" (model/describe-record record))
+                  (a/>! pchan record))
+                (log/warn "Can't send invalid record" (model/describe-record record) checks)))
+            (catch Exception e
+              (log/error "Exception occured in producer for record" record e)))
           (recur (a/<! msgs-out)))))
     {:driver pdriver
      :chan msgs-out}))
@@ -50,7 +53,7 @@
       (loop [record (a/<! cchan)]
         (if record
           (do
-            (a/>! msgs-in record)
+            (a/>! msgs-in (assoc record :action (:key record)))
             (recur (a/<! cchan)))
           (a/close! msgs-in))))
     (a/go ; drain and ignore control messages

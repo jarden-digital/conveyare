@@ -55,17 +55,6 @@
   (let [t (:transport @state)]
     (transport/send-record! t record)))
 
-(defn route-case
-  "Creates a router function, that takes a Record and returns either
-  a Receipt if processed, or nil if not"
-  [& clauses]
-  (apply router/route-case clauses))
-
-(defn accept
-  ""
-  [route & args]
-  (apply router/accept route args))
-
 ;; example middleware
 
 (defn wrap-json-middleware [handler]
