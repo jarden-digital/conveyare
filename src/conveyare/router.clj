@@ -123,8 +123,7 @@
     (case (:status receipt)
       :ok (do
             (log/info "Ok" (model/describe-record input-record))
-            (doseq [record (:output receipt)]
-            (t/send-record! transport record)))
+            (t/send-record! transport (select-keys receipt [:value :topic :key])))
       :accepted (log/info "Accepted" (model/describe-record input-record))
       :processed (log/info "Processed" (model/describe-record input-record))
       :bad-request (log/warn "Bad request" (model/describe-record input-record) (:description receipt))
