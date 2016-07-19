@@ -8,7 +8,7 @@
   `(let [x# ~form]
      (is (= ~status (:status x#)))
      (is (= "Exception occured" (:description x#)))
-     (is (= [] (:output x#)))
+     (is (= nil (:body x#)))
      (is (= ~class (class (:exception x#))))))
 
 ;; TODO test output is a record, with correct to topic, id, action, value
@@ -31,17 +31,23 @@
       (is (= nil
              (x {:action "/product/b1?foo=bar"}))))
     (testing "matching no arg action"
-      (is (= {:status :processed :output []}
+      (is (= {:status :processed
+              :produce false}
              (y {:action "/user"}))))
     (testing "matching action"
       (is (= {:status :ok
-              :output [{:value "<>soup"}]}
-             (x {:action "/product/soup"})))
+              :produce true
+              :body "<>soup"}
+             (x {:topic "in"
+                 :action "/product/soup"})))
       (is (= {:status :ok
-              :output [{:value "<>b1"}]}
-             (x {:action "/product/b1"}))))
+              :produce true
+              :body "<>b1"}
+             (x {:topic "in"
+                 :action "/product/b1"}))))
     (testing "body extraction"
-      (is (= {:status :processed :output []}
+      (is (= {:status :processed
+              :produce false}
              (z {:action "/job"
                  :body {:q "42"}}))))))
 
@@ -54,13 +60,14 @@
                         "john" false))]
     (testing "happy case"
       (is (= {:status :ok
-              :output [{:value {:bar "?bob"}}]}
+              :produce true
+              :body {:bar "?bob"}}
              (x {:action "/author/bob"
                  :body {:foo 456}}))))
     (testing "accept schema"
       (is (= {:status :bad-request
-              :description "{:foo (not (instance? java.lang.Number \"hi\"))}"
-              :output []}
+              :produce false
+              :description "{:foo (not (instance? java.lang.Number \"hi\"))}"}
              (x {:action "/author/sue"
                  :body {:foo "hi"}}))))
     (testing "exception"
@@ -74,11 +81,12 @@
                         "48" (r/reply 1)
                         "12" nil))]
     (is (= {:status :ok
-            :output [{:value 1}]}
+            :produce true
+            :body 1}
            (x {:topic "order-machine"
                :action "/order/48/add"
                :body {:item "pants" :quant 89}})))
-    (is (= {:status :processed :output []}
+    (is (= {:status :processed :produce false}
            (x {:topic "order-machine"
                :action "/order/12/add"
                :body {:item "pants" :quant 89}})))
@@ -98,9 +106,10 @@
                                :accept {:total s/Num} ; optional check
                                (order-add id order-line)))]
     (is (= {:status :ok
-            :output [{:topic "orders-topic"
-                      :action "/order/48/accepted"
-                      :value {:total 90}}]}
+            :produce true
+            :topic "orders-topic"
+            :action "/order/48/accepted"
+            :body {:total 90}}
            (x {:topic "order-machine"
                :action "/order/48/add"
                :body {:item "pants" :quant 89}})))))
@@ -110,9 +119,9 @@
             (r/endpoint "/add" _ (str "a|" pid))
             (r/endpoint "/push/:sub" {{sub :sub} :params} (str "b|" pid "|" sub)))]
     (testing "matching actions"
-      (is (= {:status :processed :output []}
+      (is (= {:status :processed :produce false}
              (x {:action "/product/cheese/add"})))
-      (is (= {:status :processed :output []}
+      (is (= {:status :processed :produce false}
              (x {:action "/product/cheese/push/mild"}))))))
 
 (deftest router-routes
@@ -127,12 +136,14 @@
                         (r/reply "maybe")))]
     (testing "good endpoints"
       (is (= {:status :ok
-              :output [{:value "no"}]}
+              :produce true
+              :body "no"}
              (x {:topic "topic-1"
                  :action "/c/d"
                  :body {}})))
       (is (= {:status :ok
-              :output [{:value "maybe"}]}
+              :produce true
+              :body "maybe"}
              (x {:topic "topic-2"
                  :action "/e"
                  :body {}}))))

@@ -6,69 +6,51 @@
 (s/defschema Record
   {:topic s/Str
    (s/optional-key :key) s/Str
-   :action s/Str
-   :value s/Any})
-
-(s/defschema OutputRecord
-  {(s/optional-key :topic) s/Str
-   (s/optional-key :key) s/Str
-   (s/optional-key :action) s/Str
-   :value s/Any})
+   :action (s/maybe s/Str)
+   :body s/Any})
 
 (s/defschema Receipt
   {:status (s/enum :ok :accepted :processed
                    :bad-request :internal-error)
+   :produce s/Bool
    (s/optional-key :description) s/Str
    (s/optional-key :exception) Exception
-   :output [OutputRecord]})
+   (s/optional-key :topic) s/Str
+   (s/optional-key :action) s/Str
+   (s/optional-key :key) s/Str
+   (s/optional-key :body) s/Any})
 
 (s/defschema TransportRecord
   {:topic s/Str
    (s/optional-key :key) s/Str
    :value s/Str})
 
-(def record-checker (s/checker TransportRecord))
-
-(def receipt-checker (s/checker Receipt))
-
 (def ^:private time-formatter
   (tf/formatters :date-time))
 
-(s/defn record :- Record
-  [topic uuid action data]
-  (let [at (t/now)]
-    {:topic topic
-     :key action
-     :value {:id (str uuid)
-             :time (tf/unparse time-formatter at)
-             :version "0.1.0"
-             :user {:name "system"}
-             :action action
-             :data data}}))
-
 (s/defn ok :- Receipt
-  [output]
-  (let [output (if (vector? output) output [output])]
-    {:status :ok
-     :output output}))
+  [body]
+  {:status :ok
+   :produce false
+   :body body})
 
 (s/defn status :- Receipt
   [status]
   {:status status
-   :output []})
+   :produce false})
 
 (s/defn failure :- Receipt
   [status description]
   {:status status
-   :description description
-   :output []})
+   :produce false
+   :description description})
 
 (s/defn exception :- Receipt
   [status description ex]
   {:status status
+   :produce false
    :description description
-   :exception ex
-   :output []})
+   :exception ex})
 
-(defn describe-record [{topic :topic key :key}]
-  (str topic " >> " key))
+(defn describe-record [{topic :topic status :status}]
+  (str topic " >> " status))

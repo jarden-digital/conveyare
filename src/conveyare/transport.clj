@@ -1,11 +1,13 @@
 (ns conveyare.transport
-  (:require [conveyare.model :as model :refer [record-checker]]
+  (:require [conveyare.model :as model :refer [TransportRecord]]
             [clojure.core.async :as a]
             [schema.core :as s]
             [clojure.tools.logging :as log]
             [kinsky.client :as q]
             [kinsky.async :as q.async]
             [clojure.string :as string]))
+
+(def record-checker (s/checker TransportRecord))
 
 (defn create-producer [conf]
   (let [servers (get conf :bootstrap.servers "localhost:9092")

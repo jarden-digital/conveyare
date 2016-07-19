@@ -11,6 +11,8 @@
 ; TODO generate documentation from this
 ; TODO make routes more performant by compiling schema checks etc upfront
 
+(def receipt-checker (s/checker model/Receipt))
+
 (defn- action-matches [action-matcher message]
   (let [action (:action message)
         faux-request (assoc message :uri action)]
@@ -27,7 +29,7 @@
    (get options option s/Any)))
 
 (defn receipted [val receiptf]
-  (if (model/receipt-checker val)
+  (if (receipt-checker val)
     (receiptf val)
     val))
 
@@ -100,16 +102,13 @@
     `(let [checker# (checker-for-option :accept ~options)
            action# (get ~options :action)
            topic# (get ~options :to)
-           ; TODO check there is only a single output
            res# (receipted ~f
                            (fn [val#]
-                             (model/ok [{:value val#}])))
-           res# (update res# :output
-                        (fn [os#]
-                          (map #(merge %
-                                       (when action# {:action action#})
-                                       (when topic# {:topic topic#}))
-                               os#)))
+                             (merge
+                              (model/ok val#)
+                              {:produce true}
+                              (when action# {:action action#})
+                              (when topic# {:topic topic#}))))
            problems# (receipt-output-check checker# res#)]
        (if problems#
          (model/failure :internal-error (pr-str problems#))
