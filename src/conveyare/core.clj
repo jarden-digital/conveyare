@@ -8,6 +8,7 @@
 (def default-opts
   {:topics []
    :handler nil ; wrapped in middleware
+   :out-handler nil ; wrapped in middleware
    :transport {:bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
@@ -29,6 +30,7 @@
     (swap! state merge
            {:transport t
             :router r
+            :out-handler (:out-handler opts)
             :up true})
     :started))
 
@@ -47,6 +49,11 @@
   (:up @state))
 
 (defn send-message!
-  [record]
-  (let [t (:transport @state)]
-    (transport/send-record! t record)))
+  [receipt]
+  (let [this @state
+        t (:transport this)
+        handler (:out-handler this)
+        out (if handler
+          (handler receipt)
+          receipt)]
+    (transport/send-record! t (select-keys out [:value :topic :key]))))
