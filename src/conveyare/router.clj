@@ -117,24 +117,33 @@
 (defmacro non-daemon-thread [& body]
   `(.start (Thread. (fn [] ~@body))))
 
-(defn process-receipt [transport input-record receipt]
-  (if-not receipt
-    (log/debug "Dead letters" (model/describe-record input-record))
-    (case (:status receipt)
-      :ok (do
-            (log/info "Ok" (model/describe-record input-record))
-            (t/send-record! transport (select-keys receipt [:value :topic :key])))
-      :accepted (log/info "Accepted" (model/describe-record input-record))
-      :processed (log/info "Processed" (model/describe-record input-record))
-      :bad-request (log/warn "Bad request" (model/describe-record input-record) (:description receipt))
-      :internal-error (if-let [e (:exception receipt)]
-                        (log/error "Internal error" (model/describe-record input-record) (:description receipt) e)
-                        (log/error "Internal error" (model/describe-record input-record) (:description receipt)))
-      (log/error "Internal error, unexpected receipt" receipt))))
+(defn- logging-middleware [handler]
+  (fn [record]
+    (log/debug "Received" (model/describe-record record))
+    (let [receipt (handler record)]
+      (if-not receipt
+        (log/debug "Dead letters" (model/describe-record record))
+        (case (:status receipt)
+          :ok (log/info "Ok"
+                        (model/describe-record record)
+                        "-->"
+                        (model/describe-record receipt))
+          :accepted (log/info "Accepted" (model/describe-record record))
+          :processed (log/info "Processed" (model/describe-record record))
+          :bad-request (log/warn "Bad request" (model/describe-record record) (:description receipt))
+          :internal-error (if-let [e (:exception receipt)]
+                            (log/error "Internal error" (model/describe-record record) (:description receipt) e)
+                            (log/error "Internal error" (model/describe-record record) (:description receipt)))
+          (log/error "Internal error, unexpected receipt" receipt)))
+      receipt)))
 
 (defn start [opts transport]
   (let [topics (:topics opts)
         handler (:handler opts)
+        middleware (:middleware opts)
+        processor (-> handler
+                      logging-middleware
+                      middleware)
         initial-cs (for [topic topics]
                      (get-in transport [:topics topic :chan]))]
     (when (pos? (count initial-cs))
@@ -145,9 +154,8 @@
          (let [[r c] (a/alts!! cs)]
            (if (nil? r)
              (recur (dissoc cs c))
-             (do
-               (log/debug "Received" (model/describe-record r))
-               (process-receipt transport r (handler r))
+             (let [receipt (processor r)]
+               (t/process-receipt! transport receipt)
                (recur cs)))))))
     {:up true}))
 

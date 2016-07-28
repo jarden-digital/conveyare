@@ -2,13 +2,14 @@
   (:require [conveyare.model :as model]
             [conveyare.router :as router]
             [conveyare.transport :as transport]
+            [conveyare.middleware :as middleware]
             [clojure.core.async :as a]
             [clojure.tools.logging :as log]))
 
 (def default-opts
   {:topics []
-   :handler nil ; wrapped in middleware
-   :out-handler nil ; wrapped in middleware
+   :handler nil
+   :middleware nil
    :transport {:bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
@@ -16,6 +17,7 @@
 
 ; TODO topics are implicit from handler definition?
 ; TODO different topics have different middleware? middleware can detect that anyway
+; TODO different topics have different threads so that one doesn't overwhelm / block the other
 
 (defonce ^:private state
   (atom {}))
@@ -30,7 +32,7 @@
     (swap! state merge
            {:transport t
             :router r
-            :out-handler (:out-handler opts)
+            :middleware (:middleware opts)
             :up true})
     :started))
 
@@ -51,9 +53,11 @@
 (defn send-message!
   [receipt]
   (let [this @state
-        t (:transport this)
-        handler (:out-handler this)
-        out (if handler
-          (handler receipt)
-          receipt)]
-    (transport/send-record! t (select-keys out [:value :topic :key]))))
+        transport (:transport this)
+        receipt (assoc receipt :produce true)
+        processor (-> (fn [_]
+                        (log/info "Produced" (model/describe-record receipt))
+                        receipt)
+                      (or (:middleware this)
+                          middleware/wrap-noop))]
+    (transport/process-receipt! transport (processor nil))))

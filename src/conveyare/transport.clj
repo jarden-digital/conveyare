@@ -82,7 +82,10 @@
       (.stop! (:driver topic) 1000))
     (assoc this :up false)))
 
-(defn send-record! [this record]
-  (if-let [c (get-in this [:producer :chan])]
-    (a/>!! c record)
-    (log/error "Failed to send message, transport not available")))
+(defn process-receipt! [this receipt]
+  (when (:produce receipt)
+    (let [c (get-in this [:producer :chan])
+          transport-record (select-keys receipt [:value :topic :key])]
+      (if c
+        (a/>!! c transport-record)
+        (log/error "Failed to send message, transport not available")))))

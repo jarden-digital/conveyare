@@ -52,5 +52,5 @@
    :description description
    :exception ex})
 
-(defn describe-record [{topic :topic status :status}]
-  (str topic " >> " status))
+(defn describe-record [{topic :topic action :action}]
+  (str topic ":" action))
