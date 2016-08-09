@@ -55,9 +55,10 @@
   (let [this @state
         transport (:transport this)
         receipt (assoc receipt :produce true)
+        middleware (or (:middleware this)
+                       middleware/wrap-noop)
         processor (-> (fn [_]
                         (log/info "Produced" (model/describe-record receipt))
                         receipt)
-                      (or (:middleware this)
-                          middleware/wrap-noop))]
+                      middleware)]
     (transport/process-receipt! transport (processor nil))))
