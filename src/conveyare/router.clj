@@ -119,22 +119,25 @@
 
 (defn- logging-middleware [handler]
   (fn [record]
-    (log/debug "Received" (model/describe-record record))
-    (let [receipt (handler record)]
+    (let [record-desc (model/describe-record record)
+          _ (log/debug "Received" record-desc)
+          start (. System (currentTimeMillis))
+          receipt (handler record)
+          end (. System (currentTimeMillis))
+          duration (str (- end start) "ms")]
       (if-not receipt
-        (log/debug "Dead letters" (model/describe-record record))
+        (log/debug "Dead letters" record-desc duration)
         (case (:status receipt)
           :ok (log/info "Ok"
-                        (model/describe-record record)
-                        "-->"
-                        (model/describe-record receipt))
-          :accepted (log/info "Accepted" (model/describe-record record))
-          :processed (log/info "Processed" (model/describe-record record))
-          :bad-request (log/warn "Bad request" (model/describe-record record) (:description receipt))
+                        record-desc "-->" (model/describe-record receipt)
+                        duration)
+          :accepted (log/info "Accepted" record-desc duration)
+          :processed (log/info "Processed" record-desc duration)
+          :bad-request (log/warn "Bad request" record-desc (:description receipt) duration)
           :internal-error (if-let [e (:exception receipt)]
-                            (log/error "Internal error" (model/describe-record record) (:description receipt) e)
-                            (log/error "Internal error" (model/describe-record record) (:description receipt)))
-          (log/error "Internal error, unexpected receipt" receipt)))
+                            (log/error e "Internal error" record-desc (:description receipt) duration)
+                            (log/error "Internal error" record-desc (:description receipt) duration))
+          (log/error "Internal error, unexpected receipt" receipt duration)))
       receipt)))
 
 (defn start [opts transport]
