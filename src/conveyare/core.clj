@@ -10,10 +10,20 @@
   {:topics []
    :handler nil
    :middleware nil
+   :router {:concurrency 10}
    :transport {:bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
                               :max.request.size 5000000}}})
+
+(letfn [(merge-in* [a b]
+          (if (map? a)
+            (merge-with merge-in* a b)
+            b))]
+  (defn merge-in
+    "Merge multiple nested maps."
+    [& args]
+    (reduce merge-in* nil args)))
 
 ; TODO topics are implicit from handler definition?
 ; TODO different topics have different middleware? middleware can detect that anyway
@@ -25,8 +35,9 @@
 (defn start
   "Start conveyare system."
   [& opts]
-  (let [opts (merge default-opts
-                    (apply hash-map opts))
+  (let [opts (merge-in default-opts
+                       (apply hash-map opts))
+        _ (log/info "Conveyare opts" opts)
         t (transport/start opts)
         r (router/start opts t)]
     (swap! state merge

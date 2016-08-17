@@ -141,7 +141,8 @@
       receipt)))
 
 (defn start [opts transport]
-  (let [topics (:topics opts)
+  (let [workers (get-in opts [:router :concurrency])
+        topics (:topics opts)
         handler (:handler opts)
         middleware (:middleware opts)
         processor (-> handler
@@ -150,16 +151,17 @@
         initial-cs (for [topic topics]
                      (get-in transport [:topics topic :chan]))]
     (when (pos? (count initial-cs))
-      (log/info "Starting router for" topics))
-    (non-daemon-thread
-     (loop [cs initial-cs]
-       (when (pos? (count cs))
-         (let [[r c] (a/alts!! cs)]
-           (if (nil? r)
-             (recur (dissoc cs c))
-             (let [receipt (processor r)]
-               (t/process-receipt! transport receipt)
-               (recur cs)))))))
+      (log/info "Starting router for" topics "with concurrency" workers))
+    (dotimes [_ workers]
+      (non-daemon-thread
+       (loop [cs initial-cs]
+         (when (pos? (count cs))
+           (let [[record c] (a/alts!! cs)]
+             (if (nil? record)
+               (recur (dissoc cs c))
+               (let [receipt (processor record)]
+                 (t/process-receipt! transport receipt)
+                 (recur cs))))))))
     {:up true}))
 
 (defn stop [router]
