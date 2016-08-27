@@ -12,16 +12,16 @@
 (defn create-producer [conf]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
         ops (get conf :producer-ops {})
-        [pdriver pchan pctl] (q.async/producer (merge {:bootstrap.servers servers}
+        [in out] (q.async/producer (merge {:bootstrap.servers servers}
                                                       ops)
                                                (q/string-serializer)
                                                (q/string-serializer))
         msgs-out (a/chan)]
     (a/go ; drain and ignore control messages
-      (loop [msg (a/<! pctl)]
+      (loop [msg (a/<! out)]
         (when msg
           (log/info "Producer control" msg)
-          (recur (a/<! pctl)))))
+          (recur (a/<! out)))))
     (a/go ; drain records to producer channel
       (loop [record (a/<! msgs-out)]
         (when record
@@ -30,37 +30,38 @@
               (if (nil? checks)
                 (do
                   (log/debug "Sending" (model/describe-record record))
-                  (a/>! pchan record))
+                  (a/>! in (assoc record :op :record)))
                 (log/warn "Can't send invalid record" (model/describe-record record) checks)))
             (catch Exception e
               (log/error "Exception occured in producer for record" record e)))
           (recur (a/<! msgs-out)))))
-    {:driver pdriver
+    {:driver in
      :chan msgs-out}))
 
 (defn create-consumer [conf topic]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
         ops (get conf :consumer-ops {})
-        [cdriver cchan cctl] (q.async/consume! (merge {:bootstrap.servers servers
-                                                       :group.id "conveyare-service"}
-                                                      ops)
-                                               (q/string-deserializer)
-                                               (q/string-deserializer)
-                                               topic)
-        msgs-in (a/chan)]
-    (a/go ; drain incoming records from consumer change
-      (loop [record (a/<! cchan)]
+        [out ctl] (q.async/consumer (merge {:bootstrap.servers servers
+                                            :group.id "myservice"
+                                            :enable.auto.commit false
+                                            :session.timeout.ms 30000}
+                                           ops)
+                                    (q/string-deserializer)
+                                    (q/string-deserializer))
+        msgs-in (a/chan)
+        control-chan (a/chan)
+        offsets (atom {})]
+    (a/put! ctl {:op :subscribe :topic topic})
+    (a/go ; drain incoming records from consumer
+      (loop [record (a/<! out)]
         (if record
           (do
-            (a/>! msgs-in (assoc record :action (:key record)))
-            (recur (a/<! cchan)))
+            (case (:type record)
+              :record (a/>! msgs-in (assoc record :action (:key record)))
+              (log/info "Consumer control msg" record))
+            (recur (a/<! out)))
           (a/close! msgs-in))))
-    (a/go ; drain and ignore control messages
-      (loop [msg (a/<! cctl)]
-        (when msg
-          (log/info "Consumer control" topic "msg" msg)
-          (recur (a/<! cctl)))))
-    {:driver cdriver
+    {:driver ctl
      :chan msgs-in}))
 
 (defn start [{:keys [transport topics handler]}]
@@ -76,10 +77,10 @@
   (let [producer (:producer this)
         topics (vals (:topics this))]
     (a/close! (:chan producer))
-    (.close! (:driver producer) 1000)
+    (a/put! (:driver producer) {:op :close})
     (doseq [topic topics]
       (a/close! (:chan topic))
-      (.stop! (:driver topic) 1000))
+      (a/put! (:driver topic) {:op :stop}))
     (assoc this :up false)))
 
 (defn process-receipt! [this receipt]

@@ -40,7 +40,7 @@
 (defn start-transport [setup]
   (let [t (x/start {:topics ["topic1"]
                     :transport {:bootstrap.servers (:bootstrap.servers setup)
-                                :consumer-ops {:group-id "group1"}
+                                :consumer-ops {:group.id "group1"}
                                 :producer-ops {:compression.type "gzip"
                                                :max.request.size 5000000}}})]
     ;; wait for startup (lame, yes)
