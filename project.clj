@@ -12,8 +12,14 @@
                  [spootnik/kinsky "0.1.8"]]
   :deploy-repositories [["clojars" {:sign-releases false}]]
   :profiles
-  {:dev {:dependencies [[pjstadig/humane-test-output "0.7.1"]]
+  {:dev {:dependencies [[pjstadig/humane-test-output "0.7.1"]
+                        [org.apache.kafka/kafka_2.11 "0.9.0.0"]
+                        [org.apache.curator/curator-test "2.11.0"]]
+         :resource-paths ["env/dev/resources"]
          :plugins [[com.jakemccrary/lein-test-refresh "0.14.0"]
                    [lein-kibit "0.1.2"]]
          :injections [(require 'pjstadig.humane-test-output)
-                      (pjstadig.humane-test-output/activate!)]}})
+                      (pjstadig.humane-test-output/activate!)]}
+   :test {:dependencies [[org.apache.kafka/kafka_2.11 "0.9.0.0"]
+                         [org.apache.curator/curator-test "2.11.0"]]
+          :resource-paths ["env/dev/resources"]}})
