@@ -52,5 +52,5 @@
    :description description
    :exception ex})
 
-(defn describe-record [{topic :topic action :action}]
-  (str topic ":" action))
+(defn describe-record [record]
+  ((juxt :action :topic :partition :offset) record))

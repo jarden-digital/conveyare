@@ -152,18 +152,20 @@
         confirm-chan (t/confirm-chan transport)]
     (when (pos? (count topics))
       (log/info "Starting router for" topics "with concurrency" workers))
-    (dotimes [_ workers]
+    (dotimes [n workers]
       (non-daemon-thread
        (loop []
          (when-let [record (a/<!! record-chan)]
            (try
+             ;(log/debug "Worker thread" n "processing" (dissoc record :value))
              (let [receipt (processor record)]
                (t/process-receipt! transport receipt))
              (catch Exception ex
                (log/error "Routing exception while processing record" record)))
            ;; Currently confirm regardless of exception or not
-           (a/put! confirm-chan record)
-           (recur)))))
+           (a/>!! confirm-chan record)
+           (recur)))
+       (log/debug "Worker thread" n "exiting")))
     {:up true}))
 
 (defn stop [router]

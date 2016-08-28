@@ -38,27 +38,39 @@
     {:driver in
      :chan msgs-out}))
 
+(defn fast-forward-offset-data [data]
+  (loop [[o ff] ((juxt :offset :fast-forward) data)]
+    (let [next (inc o)]
+      (if-not (contains? ff next)
+        (assoc data
+               :offset o
+               :fast-forward ff)
+        (recur [next (disj ff next)])))))
+
 (defn update-offset [offsets record now]
   (let [{:keys [topic partition offset]} record]
-    (let [{:keys [low low-updated high]} (get-in offsets [topic partition] {:low 0 :high 0})
-          low-updated? (or (zero? low) (== offset low))
-          updated-offset {:low  (if low-updated?
-                                  (inc offset)
-                                  low)
-                          :low-updated (if low-updated?
-                                         now
-                                         low-updated)
-                          :high (if (<= high offset)
-                                  (inc offset)
-                                  high)}]
-      (assoc-in offsets [topic partition] updated-offset))))
+    (let [data (get-in offsets [topic partition] {:offset -1 :fast-forward #{}})
+          current-offset (:offset data)]
+      (if (< offset current-offset)
+        offsets
+        (let [advance? (or (neg? current-offset) (== offset current-offset))
+              data (if advance?
+                     (-> (assoc data
+                               :offset (inc offset)
+                               :at now)
+                         fast-forward-offset-data)
+                     (update data :fast-forward #(conj % (inc offset))))]
+          (assoc-in
+           offsets
+           [topic partition]
+           data))))))
 
 (defn topic-offsets [offsets]
   (for [[topic partitions] offsets
         [partition v] partitions]
     {:topic topic
      :partition partition
-     :offset (:low v)
+     :offset (:offset v)
      :metadata ""}))
 
 (defn create-consumer [conf topic]
@@ -92,13 +104,14 @@
   "Start the transport system"
   [{:keys [transport topics handler router]}]
   (log/info "Starting transport" transport)
-  (let [producer (create-producer transport)
+  (let [concurrency (get router :concurrency 5)
+        producer (create-producer transport)
         consumers (for [topic topics]
                     [topic (create-consumer transport topic)])
-        control-chan (a/chan)
+        control-chan (a/chan concurrency)
         offsets (atom {})
         out-chan (a/merge (map #(:chan (second %)) consumers)
-                          (get router :concurrency 5))]
+                          concurrency)]
     (a/go ; drain control messages for offsets
       (loop [sync (a/timeout 5000)]
         (let [[message ch] (a/alts! [control-chan sync])]
@@ -111,10 +124,12 @@
                       offsets (topic-offsets
                                (select-keys current-offsets
                                             [topic]))]
-                  (log/debug "Commiting offsets" topic offsets)
                   (when (seq offsets)
+                    (log/debug "Commiting offsets" topic offsets)
                     (a/>! driver {:op :commit
-                                  :topic-offsets offsets})))))
+                                  :topic-offsets offsets}))))
+              (recur (a/timeout 5000)))
+
             (some? message)
             (do
               (swap! offsets #(update-offset

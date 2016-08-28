@@ -24,18 +24,14 @@
               "log.dir" (. log-dir (getAbsolutePath))
               "log.flush.interval.messages" "1"}
         kafka (KafkaServerStartable. (KafkaConfig. conf))]
-    ;; (println "About to start" kafka "using" conf)
     (. kafka (startup))
-    ;; (println "Started" kafka)
     {:zk zk
      :kafka kafka
      :bootstrap.servers (str "localhost:" port)}))
 
 (defn stop-server [server]
   (. (:kafka server) (shutdown))
-  (. (:zk server) (stop))
-  ;; (println "Stopped")
-  )
+  (. (:zk server) (stop)))
 
 (defn start-transport [server]
   (let [conf {:topics ["topic1"]
@@ -121,41 +117,67 @@
       (stop-server server))))
 
 (deftest offset-upkeep
-  (is (= {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-         (x/update-offset {}
-                          {:topic "topic1"
-                           :partition 0
-                           :offset 2}
-                          1111)))
-  (is (= {"topic1" {0 {:low 3 :high 3 :low-updated 1111}
-                    3 {:low 1 :high 1 :low-updated 2222}}}
-         (x/update-offset {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-                          {:topic "topic1"
-                           :partition 3
-                           :offset 0}
-                          2222)))
-  (is (= {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}
-          "bananas" {5 {:low 1000 :high 1000 :low-updated 3333}}}
-         (x/update-offset {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-                          {:topic "bananas"
-                           :partition 5
-                           :offset 999}
-                          3333)))
-  (is (= {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-         (x/update-offset {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-                          {:topic "topic1"
-                           :partition 0
-                           :offset 0}
-                          4444)))
-  (is (= {"topic1" {0 {:low 4 :high 4 :low-updated 5555}}}
-         (x/update-offset {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-                          {:topic "topic1"
-                           :partition 0
-                           :offset 3}
-                          5555)))
-  (is (= {"topic1" {0 {:low 3 :high 10 :low-updated 1111}}}
-         (x/update-offset {"topic1" {0 {:low 3 :high 3 :low-updated 1111}}}
-                          {:topic "topic1"
-                           :partition 0
-                           :offset 9}
-                          6666))))
+  (testing "empty"
+    (is (= {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}}}
+           (x/update-offset {}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 2}
+                            1111))))
+  (testing "new partition"
+    (is (= {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}
+                      3 {:offset 1 :fast-forward #{} :at 2222}}}
+           (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}}}
+                            {:topic "topic1"
+                             :partition 3
+                             :offset 0}
+                            2222))))
+  (testing "new topic"
+    (is (= {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}}
+            "bananas" {5 {:offset 1000 :fast-forward #{} :at 3333}}}
+           (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}}}
+                            {:topic "bananas"
+                             :partition 5
+                             :offset 999}
+                            3333))))
+  (testing "ignore weird case where offset is lower"
+    (is (= {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
+           (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 1}
+                            4444)))
+    (is (= {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
+           (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 2}
+                            4444))))
+  (testing "offset is next, no fast-forward, advance simply"
+    (is (= {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
+           (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 3}
+                            4444))))
+  (testing "store up fast forward"
+    (is (= {"topic1" {0 {:offset 4 :fast-forward #{6 7} :at 4444}}}
+           (x/update-offset {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 6}
+                            5555)))
+    (is (= {"topic1" {0 {:offset 4 :fast-forward #{6 100} :at 4444}}}
+           (x/update-offset {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 99}
+                            5555))))
+  (testing "advance and fast-forward"
+    (is (= {"topic1" {0 {:offset 8 :fast-forward #{12 34 13 10} :at 6666}}}
+           (x/update-offset {"topic1" {0 {:offset 5 :fast-forward #{12 7 34 8 13 10} :at 1111}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 5}
+                            6666))))
+  )
