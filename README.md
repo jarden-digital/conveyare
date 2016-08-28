@@ -9,14 +9,15 @@ Conveyare is a light routing library for [Kafka](https://kafka.apache.org) based
 Add the following dependency to your `project.clj` file:
 
 ```clj
-[com.ververve/conveyare "0.3.0"]
+[com.ververve/conveyare "0.4.3"]
 ```
 
 ## Usage
 
 ```clj
-(require '[conveyare.core :refer [endpoint context reply]])
+(require '[conveyare.router :refer [routes endpoint context reply]])
 ```
+
 
 Process an incoming message, without reply:
 
@@ -37,6 +38,23 @@ Reply to an incoming message with a new message on a given topic
                  :action (str "/order/" id "/accepted") ; optional, default to originating action
                  :accept {:total s/Num} ; optional check
                  (db/order-add id order-line)))
+```
+
+Put it all together in routes context:
+
+```clj
+(def my-routes
+  (routes
+    (context "/order/:id" {{id :id} :params}
+      (endpoint "/ready" _
+        ;; as above
+        )
+      (endpoint "/add" {order-line :body}
+        ;; as above
+        ))
+    (context "/other/context"
+      ;; ...
+      ))
 ```
 
 ## License
