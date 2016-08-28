@@ -38,19 +38,43 @@
     {:driver in
      :chan msgs-out}))
 
+(defn update-offset [offsets record now]
+  (let [{:keys [topic partition offset]} record]
+    (let [{:keys [low low-updated high]} (get-in offsets [topic partition] {:low 0 :high 0})
+          low-updated? (or (zero? low) (== offset low))
+          updated-offset {:low  (if low-updated?
+                                  (inc offset)
+                                  low)
+                          :low-updated (if low-updated?
+                                         now
+                                         low-updated)
+                          :high (if (<= high offset)
+                                  (inc offset)
+                                  high)}]
+      (assoc-in offsets [topic partition] updated-offset))))
+
+(defn topic-offsets [offsets]
+  (for [[topic partitions] offsets
+        [partition v] partitions]
+    {:topic topic
+     :partition partition
+     :offset (:low v)
+     :metadata ""}))
+
 (defn create-consumer [conf topic]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
-        ops (get conf :consumer-ops {})
-        [out ctl] (q.async/consumer (merge {:bootstrap.servers servers
-                                            :group.id "myservice"
-                                            :enable.auto.commit false
-                                            :session.timeout.ms 30000}
-                                           ops)
-                                    (q/string-deserializer)
-                                    (q/string-deserializer))
-        msgs-in (a/chan)
-        control-chan (a/chan)
-        offsets (atom {})]
+        opts (merge {:bootstrap.servers servers
+                     :group.id "myservice"
+                     :auto.offset.reset "earliest"
+                     :enable.auto.commit false
+                     :session.timeout.ms 30000}
+                    (get conf :consumer-ops {}))
+        _ (log/debug "Starting consumer" topic "with opts" opts)
+        [out ctl] (q.async/consumer
+                   opts
+                   (q/string-deserializer)
+                   (q/string-deserializer))
+        msgs-in (a/chan)]
     (a/put! ctl {:op :subscribe :topic topic})
     (a/go ; drain incoming records from consumer
       (loop [record (a/<! out)]
@@ -64,26 +88,82 @@
     {:driver ctl
      :chan msgs-in}))
 
-(defn start [{:keys [transport topics handler]}]
+(defn start
+  "Start the transport system"
+  [{:keys [transport topics handler router]}]
   (log/info "Starting transport" transport)
   (let [producer (create-producer transport)
         consumers (for [topic topics]
-                    [topic (create-consumer transport topic)])]
-    {:up true
-     :producer producer
-     :topics (into {} consumers)}))
+                    [topic (create-consumer transport topic)])
+        control-chan (a/chan)
+        offsets (atom {})
+        out-chan (a/merge (map #(:chan (second %)) consumers)
+                          (get router :concurrency 5))]
+    (a/go ; drain control messages for offsets
+      (loop [sync (a/timeout 5000)]
+        (let [[message ch] (a/alts! [control-chan sync])]
+          (cond
+            (or (= sync ch)
+                (= :commit (:type message)))
+            (let [current-offsets @offsets]
+              (doseq [[topic consumer] consumers]
+                (let [driver (:driver consumer)
+                      offsets (topic-offsets
+                               (select-keys current-offsets
+                                            [topic]))]
+                  (log/debug "Commiting offsets" topic offsets)
+                  (when (seq offsets)
+                    (a/>! driver {:op :commit
+                                  :topic-offsets offsets})))))
+            (some? message)
+            (do
+              (swap! offsets #(update-offset
+                               %
+                               message
+                               (System/currentTimeMillis)))
+              (recur sync))
 
-(defn stop [this]
+            nil
+            (log/debug "Closing control chan")))))
+    {:up true
+     :control control-chan
+     :producer producer
+     :consumers (into {} consumers)
+     :out-chan out-chan}))
+
+(defn stop
+  "Stop the transport system"
+  [this]
   (let [producer (:producer this)
-        topics (vals (:topics this))]
+        consumers (:consumers this)]
+    (a/close! (:out-chan this))
+    (a/close! (:control this))
     (a/close! (:chan producer))
     (a/put! (:driver producer) {:op :close})
-    (doseq [topic topics]
-      (a/close! (:chan topic))
-      (a/put! (:driver topic) {:op :stop}))
+    (doseq [consumer (vals consumers)]
+      (a/close! (:chan consumer))
+      (a/put! (:driver consumer) {:op :stop}))
     (assoc this :up false)))
 
-(defn process-receipt! [this receipt]
+(defn record-chan
+  "Record channel containing merged stream of all consumed messages"
+  [this]
+  (:out-chan this))
+
+(defn confirm-chan
+  "Confirm channel for confirming processed topic/partition offset"
+  [this]
+  (:control this))
+
+(defn commit
+  "Commit all consumer offsets now, block until done.
+  Can't be called in a go block"
+  [this]
+  (a/>!! (:control this) {:type :commit}))
+
+(defn process-receipt!
+  "Process a receipt and send an outgoing message via transport if required"
+  [this receipt]
   (when (:produce receipt)
     (let [c (get-in this [:producer :chan])
           transport-record (select-keys receipt [:value :topic :key])]

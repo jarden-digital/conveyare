@@ -135,33 +135,35 @@
           :processed (log/info "Processed" record-desc duration)
           :bad-request (log/warn "Bad request" record-desc (:description receipt) duration)
           :internal-error (if-let [e (:exception receipt)]
-                            (log/error e "Internal error" record-desc (:description receipt) duration)
-                            (log/error "Internal error" record-desc (:description receipt) duration))
-          (log/error "Internal error, unexpected receipt" receipt duration)))
+                            (log/error e "Internal error" record (:description receipt) duration)
+                            (log/error "Internal error" record (:description receipt) duration))
+          (log/error "Internal error, unexpected receipt" record receipt duration)))
       receipt)))
 
 (defn start [opts transport]
-  (let [workers (get-in opts [:router :concurrency])
+  (let [workers (get-in opts [:router :concurrency] 5)
         topics (:topics opts)
         handler (:handler opts)
         middleware (:middleware opts)
         processor (-> handler
                       logging-middleware
                       middleware)
-        initial-cs (for [topic topics]
-                     (get-in transport [:topics topic :chan]))]
-    (when (pos? (count initial-cs))
+        record-chan (t/record-chan transport)
+        confirm-chan (t/confirm-chan transport)]
+    (when (pos? (count topics))
       (log/info "Starting router for" topics "with concurrency" workers))
     (dotimes [_ workers]
       (non-daemon-thread
-       (loop [cs initial-cs]
-         (when (pos? (count cs))
-           (let [[record c] (a/alts!! cs)]
-             (if (nil? record)
-               (recur (dissoc cs c))
-               (let [receipt (processor record)]
-                 (t/process-receipt! transport receipt)
-                 (recur cs))))))))
+       (loop []
+         (when-let [record (a/<!! record-chan)]
+           (try
+             (let [receipt (processor record)]
+               (t/process-receipt! transport receipt))
+             (catch Exception ex
+               (log/error "Routing exception while processing record" record)))
+           ;; Currently confirm regardless of exception or not
+           (a/put! confirm-chan record)
+           (recur)))))
     {:up true}))
 
 (defn stop [router]
