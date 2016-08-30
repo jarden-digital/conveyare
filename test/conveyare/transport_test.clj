@@ -123,7 +123,8 @@
                             {:topic "topic1"
                              :partition 0
                              :offset 2}
-                            1111))))
+                            1111
+                            100))))
   (testing "new partition"
     (is (= {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}
                       3 {:offset 1 :fast-forward #{} :at 2222}}}
@@ -131,7 +132,8 @@
                             {:topic "topic1"
                              :partition 3
                              :offset 0}
-                            2222))))
+                            2222
+                            100))))
   (testing "new topic"
     (is (= {"topic1" {0 {:offset 3 :fast-forward #{} :at 1111}}
             "bananas" {5 {:offset 1000 :fast-forward #{} :at 3333}}}
@@ -139,45 +141,68 @@
                             {:topic "bananas"
                              :partition 5
                              :offset 999}
-                            3333))))
+                            3333
+                            100))))
   (testing "ignore weird case where offset is lower"
     (is (= {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
            (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 1}
-                            4444)))
+                            4444
+                            100)))
     (is (= {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
            (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 2}
-                            4444))))
+                            4444
+                            100))))
   (testing "offset is next, no fast-forward, advance simply"
     (is (= {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
            (x/update-offset {"topic1" {0 {:offset 3 :fast-forward #{6} :at 1111}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 3}
-                            4444))))
+                            4444
+                            100))))
   (testing "store up fast forward"
     (is (= {"topic1" {0 {:offset 4 :fast-forward #{6 7} :at 4444}}}
            (x/update-offset {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 6}
-                            5555)))
+                            5555
+                            100)))
     (is (= {"topic1" {0 {:offset 4 :fast-forward #{6 100} :at 4444}}}
            (x/update-offset {"topic1" {0 {:offset 4 :fast-forward #{6} :at 4444}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 99}
-                            5555))))
+                            5555
+                            100))))
   (testing "advance and fast-forward"
     (is (= {"topic1" {0 {:offset 8 :fast-forward #{12 34 13 10} :at 6666}}}
            (x/update-offset {"topic1" {0 {:offset 5 :fast-forward #{12 7 34 8 13 10} :at 1111}}}
                             {:topic "topic1"
                              :partition 0
                              :offset 5}
-                            6666))))
+                            6666
+                            100))))
+  (testing "too many outstanding, but <60s"
+    (is (= {"topic1" {0 {:offset 8 :fast-forward #{12 34 13 10 11 23 99 16} :at 6666}}}
+           (x/update-offset {"topic1" {0 {:offset 8 :fast-forward #{12 34 13 10 11 23 99} :at 6666}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 15}
+                            66665
+                            7))))
+  (testing "too many outstanding, and >60s"
+    (is (= {"topic1" {0 {:offset 13 :fast-forward #{34 23 99 16} :at 6666}}}
+           (x/update-offset {"topic1" {0 {:offset 8 :fast-forward #{12 34 13 10 11 23 99} :at 6666}}}
+                            {:topic "topic1"
+                             :partition 0
+                             :offset 15}
+                            66667
+                            7))))
   )

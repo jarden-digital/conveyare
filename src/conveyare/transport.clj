@@ -4,18 +4,92 @@
             [schema.core :as s]
             [clojure.tools.logging :as log]
             [kinsky.client :as q]
-            [kinsky.async :as q.async]
-            [clojure.string :as string]))
+            [kinsky.async :as qa]
+            [clojure.string :as string])
+  (:import (org.apache.kafka.common.errors WakeupException)))
 
 (def record-checker (s/checker TransportRecord))
+
+(defn fixed-consumer
+  ([config]
+   (fixed-consumer config nil nil))
+  ([config kd vd]
+   (let [inbuf    (or (:input-buffer config) qa/default-input-buffer)
+         outbuf   (or (:output-buffer config) qa/default-output-buffer)
+         timeout  (or (:timeout config) qa/default-timeout)
+         ctl      (a/chan inbuf)
+         recs     (a/chan outbuf qa/record-xform (fn [e] (throw e)))
+         out      (a/chan outbuf)
+         listener (qa/channel-listener out)
+         driver   (qa/make-consumer config nil kd vd)
+         next!    (qa/next-poller driver timeout)]
+     (a/pipe recs out false)
+     (a/go
+       (loop [[poller payload] [(next!) nil]]
+         (let [[v c] (a/alts! (if payload
+                                [ctl [recs payload]]
+                                [ctl poller]))]
+           (condp = c
+             ctl    (let [{:keys [op topic topics topic-offsets
+                                  response topic-partitions callback]
+                           :as payload} v]
+                      (try
+                        (q/wake-up! driver)
+                        (when-let [records (a/<! poller)]
+                          (a/>! recs records))
+
+                        (cond
+                          (= op :callback)
+                          (callback driver out)
+
+                          (= op :subscribe)
+                          (q/subscribe! driver (or topics topic) listener)
+
+                          (= op :unsubscribe)
+                          (q/unsubscribe! driver)
+
+                          (and (= op :commit) topic-offsets)
+                          (try
+                            (q/commit! driver topic-offsets)
+                            (catch WakeupException _ nil))
+
+                          (= op :commit)
+                          (try
+                            (q/commit! driver)
+                            (catch WakeupException _ nil))
+
+                          (= op :pause)
+                          (q/pause! driver topic-partitions)
+
+                          (= op :resume)
+                          (q/resume! driver topic-partitions)
+
+                          (= op :partitions-for)
+                          (a/>! (or response out)
+                                {:type       :partitions
+                                 :partitions (q/partitions-for driver topic)})
+
+                          (= op :stop)
+                          (do (a/>! out {:type :eof})
+                              (q/close! driver)
+                              (a/close! out)))
+                        (catch Exception e
+                          (do (a/>! out {:type :exception :exception e})
+                              (q/close! driver)
+                              (a/close! out))))
+                      (when (not= op :stop)
+                        (recur [poller payload])))
+             poller (recur [(next!) v])
+             recs   (recur [poller nil])))))
+     [out ctl])))
 
 (defn create-producer [conf]
   (let [servers (get conf :bootstrap.servers "localhost:9092")
         ops (get conf :producer-ops {})
-        [in out] (q.async/producer (merge {:bootstrap.servers servers}
-                                                      ops)
-                                               (q/string-serializer)
-                                               (q/string-serializer))
+        [in out] (qa/producer (merge {:bootstrap.servers servers}
+                                     ops)
+                              (q/string-serializer)
+                              (q/string-serializer))
         msgs-out (a/chan)]
     (a/go ; drain and ignore control messages
       (loop [msg (a/<! out)]
@@ -47,23 +121,34 @@
                :fast-forward ff)
         (recur [next (disj ff next)])))))
 
-(defn update-offset [offsets record now]
+(defn set-offset-and-fast-forward [data offset now]
+  (-> (assoc data
+             :offset offset
+             :at now)
+      fast-forward-offset-data))
+
+;; TODO use java hash set
+(defn update-offset [offsets record now max-outstanding]
   (let [{:keys [topic partition offset]} record]
-    (let [data (get-in offsets [topic partition] {:offset -1 :fast-forward #{}})
-          current-offset (:offset data)]
+    (let [data (get-in offsets [topic partition] {:offset -1 :fast-forward #{} :at 0})
+          current-offset (:offset data)
+          last-updated (:at data)]
       (if (< offset current-offset)
         offsets
         (let [advance? (or (neg? current-offset) (== offset current-offset))
               data (if advance?
-                     (-> (assoc data
-                               :offset (inc offset)
-                               :at now)
-                         fast-forward-offset-data)
-                     (update data :fast-forward #(conj % (inc offset))))]
-          (assoc-in
-           offsets
-           [topic partition]
-           data))))))
+                     (set-offset-and-fast-forward data (inc offset) now)
+                     (let [data (update data :fast-forward #(conj % (inc offset)))
+                           fast-forward (:fast-forward data)]
+                       (if (and (< max-outstanding (count fast-forward))
+                                (< 60000 (- now last-updated)))
+                         ;; too many
+                         (do
+                           (log/warn "Can't guarantee consumption of record " [topic partition current-offset])
+                           (set-offset-and-fast-forward data (inc current-offset) last-updated))
+                         ;; still ok
+                         data)))]
+          (assoc-in offsets [topic partition] data))))))
 
 (defn topic-offsets [offsets]
   (for [[topic partitions] offsets
@@ -79,10 +164,11 @@
                      :group.id "myservice"
                      :auto.offset.reset "earliest"
                      :enable.auto.commit false
+                     :max.poll.records 100
                      :session.timeout.ms 30000}
                     (get conf :consumer-ops {}))
         _ (log/debug "Starting consumer" topic "with opts" opts)
-        [out ctl] (q.async/consumer
+        [out ctl] (fixed-consumer
                    opts
                    (q/string-deserializer)
                    (q/string-deserializer))
@@ -105,6 +191,7 @@
   [{:keys [transport topics handler router]}]
   (log/info "Starting transport" transport)
   (let [concurrency (get router :concurrency 5)
+        max-outstanding (* concurrency 100)
         producer (create-producer transport)
         consumers (for [topic topics]
                     [topic (create-consumer transport topic)])
@@ -131,11 +218,8 @@
               (recur (a/timeout 5000)))
 
             (some? message)
-            (do
-              (swap! offsets #(update-offset
-                               %
-                               message
-                               (System/currentTimeMillis)))
+            (let [now (System/currentTimeMillis)]
+              (swap! offsets #(update-offset % message now max-outstanding))
               (recur sync))
 
             nil
