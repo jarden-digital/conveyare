@@ -11,7 +11,8 @@
    :handler nil
    :middleware nil
    :router {:concurrency 10}
-   :transport {:bootstrap.servers "localhost:9092"
+   :transport {:concurrency 10
+               :bootstrap.servers "localhost:9092"
                :consumer-ops {:group.id "my-service"}
                :producer-ops {:compression.type "gzip"
                               :max.request.size 5000000}}})
