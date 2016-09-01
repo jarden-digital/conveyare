@@ -24,7 +24,7 @@
 (defn safe-consumer
   [config topics kd vd]
   (let [concurrency (get config :concurrency 5)
-        control-chan (a/chan concurrency)
+        control-chan (a/chan (* 10 concurrency))
         records-chan (a/chan concurrency)
         driver (qa/make-consumer (dissoc config :concurrency) nil kd vd)
         underlying @driver
