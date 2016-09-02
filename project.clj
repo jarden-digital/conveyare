@@ -1,4 +1,4 @@
-(defproject com.ververve/conveyare "0.4.5"
+(defproject com.ververve/conveyare "0.4.6"
   :description "A light routing library for Kafka"
   :url "http://github.com/ververve/conveyare"
   :license {:name "Apache License 2.0"

@@ -49,7 +49,7 @@
             (a/alt!!
               control-chan ([{:keys [op] :as control}]
                             (try
-                              (log/info "Doing control" op control)
+                              (log/debug "Doing control" op control)
                               (case op
                                 :commit
                                 (q/commit! driver (:topic-offsets control))
