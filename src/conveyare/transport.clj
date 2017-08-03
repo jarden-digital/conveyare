@@ -59,8 +59,15 @@
 
                                 :stop
                                 (. stop-flag (set true)))
-                              (catch WakeupException _ nil)
-                              (catch Exception ex (log/warn ex "Control exception")))
+                              (catch WakeupException _
+                                nil)
+                              (catch CommitFailedException ex
+                                (log/fatal ex "Commit failed")
+                                ; restart consumer, or perhaps whole transport
+                                ; or just notify library user and let them restart
+                                )
+                              (catch Exception ex
+                                (log/warn ex "Control exception")))
                             (recur))
               :default nil)))
         (if (. stop-flag get)
@@ -179,7 +186,7 @@
 
 (defn start
   "Start the transport system"
-  [{:keys [transport topics handler]}]
+  [{:keys [transport topics topic-ops handler]}]
   (log/info "Starting transport" transport)
   (let [concurrency (get transport :concurrency 5)
         max-outstanding (* concurrency 100)
@@ -202,7 +209,8 @@
                       offsets (topic-offsets
                                (select-keys current-offsets
                                             [topic]))]
-                  (when (seq offsets)
+                  (when (and (seq offsets)
+                             (contains? #{:tracking :auto} (get-in topic-ops [topic :commit-mode] :tracking)))
                     (log/debug "Commiting offsets" topic offsets)
                     (a/>! driver {:op :commit
                                   :topic-offsets offsets}))))

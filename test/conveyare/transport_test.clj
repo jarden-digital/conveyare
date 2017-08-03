@@ -33,8 +33,11 @@
   (. (:kafka server) (shutdown))
   (. (:zk server) (stop)))
 
-(defn start-transport [server]
+(defn start-transport [server commit-mode]
   (let [conf {:topics ["topic1"]
+              :topic-ops (if commit-mode
+                           {"topic1" {:commit-mode commit-mode}}
+                           {"topic1" {:commit-mode :tracking}})
               :transport {:bootstrap.servers (:bootstrap.servers server)
                           :consumer-ops {:group.id "group1"}
                           :producer-ops {:compression.type "gzip"
@@ -59,7 +62,7 @@
 
 (deftest test-simple-send-receive
   (let [server (start-server)
-        [transport chan] (start-transport server)]
+        [transport chan] (start-transport server :tracking)]
     (x/process-receipt! transport {:produce true
                                    :topic "topic1"
                                    :value "hi!"
@@ -75,46 +78,89 @@
     (stop-server server)))
 
 (deftest test-confirm
-  (let [server (start-server)
-        [transport chan] (start-transport server)]
-    (x/process-receipt! transport {:produce true
-                                   :topic "topic1"
-                                   :value "hi!"
-                                   :key "what"})
-    (x/process-receipt! transport {:produce true
-                                   :topic "topic1"
-                                   :value "bye!"
-                                   :key "how"})
-    (let [v1 (read-message chan)
-          v2 (read-message chan)]
-      (is (= {:offset 0
-              :partition 0
-              :topic "topic1"
-              :value "hi!"
-              :key "what"}
-             v1))
-      (is (= {:offset 1
-              :partition 0
-              :topic "topic1"
-              :value "bye!"
-              :key "how"}
-             v2))
-      (a/>!! (x/confirm-chan transport) v1)
-      (x/commit transport))
-    (Thread/sleep 100)
-    (stop-transport transport)
-    (Thread/sleep 100)
-    (let [[transport chan] (start-transport server)]
-      ;; last message should be read again due to no commit
-      (let [v2again (read-message chan)]
+  (testing "tracking commit-mode (default)"
+    (let [server (start-server)
+          [transport chan] (start-transport server :tracking)]
+      (x/process-receipt! transport {:produce true
+                                     :topic "topic1"
+                                     :value "hi!"
+                                     :key "what"})
+      (x/process-receipt! transport {:produce true
+                                     :topic "topic1"
+                                     :value "bye!"
+                                     :key "how"})
+      (let [v1 (read-message chan)
+            v2 (read-message chan)]
+        (is (= {:offset 0
+                :partition 0
+                :topic "topic1"
+                :value "hi!"
+                :key "what"}
+               v1))
         (is (= {:offset 1
                 :partition 0
                 :topic "topic1"
                 :value "bye!"
                 :key "how"}
-               v2again)))
+               v2))
+        (a/>!! (x/confirm-chan transport) v1)
+        (x/commit transport))
+      (Thread/sleep 100)
       (stop-transport transport)
-      (stop-server server))))
+      (Thread/sleep 100)
+      (let [[transport chan] (start-transport server :tracking)]
+        ;; last message should be read again due to no commit
+        (let [v2again (read-message chan)]
+          (is (= {:offset 1
+                  :partition 0
+                  :topic "topic1"
+                  :value "bye!"
+                  :key "how"}
+                 v2again)))
+        (stop-transport transport)
+        (stop-server server))))
+  (testing "disabled commit-mode"
+    (let [server (start-server)
+          [transport chan] (start-transport server :disabled)]
+      (x/process-receipt! transport {:produce true
+                                     :topic "topic1"
+                                     :value "hi!"
+                                     :key "what"})
+      (x/process-receipt! transport {:produce true
+                                     :topic "topic1"
+                                     :value "bye!"
+                                     :key "how"})
+      (let [v1 (read-message chan)
+            v2 (read-message chan)]
+        (is (= {:offset 0
+                :partition 0
+                :topic "topic1"
+                :value "hi!"
+                :key "what"}
+               v1))
+        (is (= {:offset 1
+                :partition 0
+                :topic "topic1"
+                :value "bye!"
+                :key "how"}
+               v2))
+        (a/>!! (x/confirm-chan transport) v1)
+        (x/commit transport))
+      (Thread/sleep 100)
+      (stop-transport transport)
+      (Thread/sleep 100)
+      (let [[transport chan] (start-transport server :disabled)]
+        ;; last message should be read again due to no commit
+        (let [v1again (read-message chan)]
+          (is (= {:offset 0
+                  :partition 0
+                  :topic "topic1"
+                  :value "hi!"
+                  :key "what"}
+                 v1again)))
+        (stop-transport transport)
+        (stop-server server))))
+  )
 
 (deftest offset-upkeep
   (testing "empty"

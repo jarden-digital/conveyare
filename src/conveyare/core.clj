@@ -8,6 +8,7 @@
 
 (def default-opts
   {:topics []
+   :topic-ops {}
    :handler nil
    :middleware nil
    :router {:concurrency 10}

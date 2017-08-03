@@ -18,7 +18,6 @@ Add the following dependency to your `project.clj` file:
 (require '[conveyare.router :refer [routes endpoint context reply]])
 ```
 
-
 Process an incoming message, without reply:
 
 ```clj
