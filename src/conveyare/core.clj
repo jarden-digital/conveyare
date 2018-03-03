@@ -75,3 +75,32 @@
                         receipt)
                       middleware)]
     (transport/process-receipt! transport (processor nil))))
+
+(defn send-request-response!
+  [receipt response-chan]
+  ;; TODO split send from receive paths, too complex
+  ;; TODO rethink everything
+  ;; TODO allow users to get to the fundamentals, or supply fundamentals, after all what is this for?
+  ;; consistent logging
+  ;; easy to get started (but it's not)
+  ;; tools for routing, sending
+  ;; wrap samp (except it doesn't, should wrap by default but allow it to be excluded)
+  ;; TODO remove schema
+  ;; TODO needs to register UUID for responses
+  ;; TODO review pedestal architecture
+  (let [tracking-id (str (java.util.UUID/randomUUID))
+        this @state
+        transport (:transport this)
+        receipt (assoc receipt
+                       :produce true
+                       :response-chan response-chan ;; TODO
+                       :tracking-id tracking-id
+                       )
+        middleware (or (:middleware this)
+                       middleware/wrap-noop)
+        processor (-> (fn [_]
+                        (log/info "Produced" (model/describe-record receipt))
+                        receipt)
+                      middleware)]
+    (transport/process-receipt! transport (processor nil)))
+  )
