@@ -3,51 +3,59 @@
             [conveyare.router :as router]
             [conveyare.transport :as transport]
             [conveyare.middleware :as middleware]
+            [conveyare.stage :as cs]
+            [conveyare.record :as cr]
+            [clojure.spec.alpha :as s]
             [clojure.core.async :as a]
             [clojure.tools.logging :as log]))
 
-(def default-opts
-  {:topics []
-   :topic-ops {}
-   :handler nil
-   :middleware nil
-   :router {:concurrency 10}
-   :transport {:concurrency 10
-               :bootstrap.servers "localhost:9092"
-               :consumer-ops {:group.id "my-service"}
-               :producer-ops {:compression.type "gzip"
-                              :max.request.size 5000000}}})
+(s/def ::topic-subscriptions (s/coll-of string? :kind vector? :distinct true))
 
-(letfn [(merge-in* [a b]
-          (if (map? a)
-            (merge-with merge-in* a b)
-            b))]
-  (defn merge-in
-    "Merge multiple nested maps."
-    [& args]
-    (reduce merge-in* nil args)))
+(s/def ::send-stages (s/coll-of ::cs/stage))
 
-; TODO topics are implicit from handler definition?
-; TODO different topics have different middleware? middleware can detect that anyway
-; TODO different topics have different threads so that one doesn't overwhelm / block the other
+(s/def ::receive-stages (s/coll-of ::cs/stage))
+
+(s/def ::setup
+  (s/keys :req [::transport/setup]
+          :opt [::topic-subscriptions ::send-stages ::receive-stages ::router/stage]))
+
+;; (def default-opts
+;;   {:topics []
+;;    :topic-ops {}
+;;    :handler nil
+
+;;    :middleware nil
+;;    :router {:concurrency 10}
+;;    :transport {:concurrency 10
+;;                :bootstrap.servers "localhost:9092"
+;;                :consumer-ops {:group.id "my-service"}
+;;                :producer-ops {:compression.type "gzip"
+;;                               :max.request.size 5000000}}})
+
+;; (letfn [(merge-in* [a b]
+;;           (if (map? a)
+;;             (merge-with merge-in* a b)
+;;             b))]
+;;   (defn merge-in
+;;     "Merge multiple nested maps."
+;;     [& args]
+;;     (reduce merge-in* nil args)))
 
 (defonce ^:private state
   (atom {}))
 
 (defn start
   "Start conveyare system."
-  [& opts]
-  (let [opts (merge-in default-opts
-                       (apply hash-map opts))
-        _ (log/info "Conveyare opts" opts)
-        t (transport/start opts)
-        r (router/start opts t)]
+  [& setup]
+  (let [_ (log/info "Conveyare setup" setup)
+        t (transport/start setup)
+        r (router/start setup t)]
     (swap! state merge
            {:transport t
             :router r
-            :middleware (:middleware opts)
+            :setup setup
             :up true})
-    :started))
+    ::started))
 
 (defn stop
   "Stop conveyare system."
@@ -56,7 +64,7 @@
     (router/stop (:router this))
     (transport/stop (:transport this))
     (swap! state assoc :up false)
-    :stopped))
+    ::stopped))
 
 (defn status
   "Returns true if conveyare is up"
@@ -71,23 +79,13 @@
         middleware (or (:middleware this)
                        middleware/wrap-noop)
         processor (-> (fn [_]
-                        (log/info "Produced" (model/describe-record receipt))
+                        (log/info "Produced" (cr/describe receipt))
                         receipt)
                       middleware)]
-    (transport/process-receipt! transport (processor nil))))
+    (transport/write-message! transport (processor nil))))
 
 (defn send-request-response!
   [receipt response-chan]
-  ;; TODO split send from receive paths, too complex
-  ;; TODO rethink everything
-  ;; TODO allow users to get to the fundamentals, or supply fundamentals, after all what is this for?
-  ;; consistent logging
-  ;; easy to get started (but it's not)
-  ;; tools for routing, sending
-  ;; wrap samp (except it doesn't, should wrap by default but allow it to be excluded)
-  ;; TODO remove schema
-  ;; TODO needs to register UUID for responses
-  ;; TODO review pedestal architecture
   (let [tracking-id (str (java.util.UUID/randomUUID))
         this @state
         transport (:transport this)
@@ -99,8 +97,8 @@
         middleware (or (:middleware this)
                        middleware/wrap-noop)
         processor (-> (fn [_]
-                        (log/info "Produced" (model/describe-record receipt))
+                        (log/info "Produced" (cr/describe receipt))
                         receipt)
                       middleware)]
-    (transport/process-receipt! transport (processor nil)))
+    (transport/write-message! transport (processor nil)))
   )

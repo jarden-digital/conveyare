@@ -63,7 +63,7 @@
 (deftest test-simple-send-receive
   (let [server (start-server)
         [transport chan] (start-transport server :tracking)]
-    (x/process-receipt! transport {:produce true
+    (x/write-message! transport {:produce true
                                    :topic "topic1"
                                    :value "hi!"
                                    :key "what"})
@@ -81,11 +81,11 @@
   (testing "tracking commit-mode (default)"
     (let [server (start-server)
           [transport chan] (start-transport server :tracking)]
-      (x/process-receipt! transport {:produce true
+      (x/write-message! transport {:produce true
                                      :topic "topic1"
                                      :value "hi!"
                                      :key "what"})
-      (x/process-receipt! transport {:produce true
+      (x/write-message! transport {:produce true
                                      :topic "topic1"
                                      :value "bye!"
                                      :key "how"})
@@ -122,11 +122,11 @@
   (testing "disabled commit-mode"
     (let [server (start-server)
           [transport chan] (start-transport server :disabled)]
-      (x/process-receipt! transport {:produce true
+      (x/write-message! transport {:produce true
                                      :topic "topic1"
                                      :value "hi!"
                                      :key "what"})
-      (x/process-receipt! transport {:produce true
+      (x/write-message! transport {:produce true
                                      :topic "topic1"
                                      :value "bye!"
                                      :key "how"})

@@ -1,17 +1,21 @@
 (ns conveyare.router
   (:require [conveyare.model :as model]
             [conveyare.transport :as t]
+            [conveyare.record :as cr]
             [clojure.core.async :as a]
-            [schema.core :as s]
+            [clojure.spec.alpha :as s]
             [clojure.tools.logging :as log]
             [clout.core :as clout]))
 
-; TODO check param schema
-; TODO route summary
-; TODO generate documentation from this
-; TODO make routes more performant by compiling schema checks etc upfront
+(s/def ::route
+  (s/cat :action string? :fn fn?))
 
-(def receipt-checker (s/checker model/Receipt))
+(s/def ::routes
+  (s/coll-of ::route))
+
+(s/def ::stage
+  (s/keys :req [::routes]
+          :opt []))
 
 (defn- action-matches [action-matcher message]
   (let [action (:action message)
@@ -24,14 +28,17 @@
     (if-let [params (action-matches action-matcher message)]
       (handler (assoc message :params params)))))
 
-(defn checker-for-option [option options]
-  (s/checker
-   (get options option s/Any)))
+;; (defn checker-for-option [option options]
+;;   (s/checker
+;;    (get options option s/Any)))
 
 (defn receipted [val receiptf]
-  (if (receipt-checker val)
-    (receiptf val)
-    val))
+  ;;TODO FIX
+  ;; (if (receipt-checker val)
+  ;;   (receiptf val)
+  ;;   val)
+  val
+  )
 
 (defmacro try-receipted [form]
   `(try (receipted ~form
@@ -119,7 +126,7 @@
 
 (defn- logging-middleware [handler]
   (fn [record]
-    (let [record-desc (model/describe-record record)
+    (let [record-desc (cr/describe record)
           _ (log/debug "Received" record-desc)
           start (. System (currentTimeMillis))
           receipt (handler record)
@@ -129,7 +136,7 @@
         (log/debug "Dead letters" record-desc duration)
         (case (:status receipt)
           :ok (log/info "Ok"
-                        record-desc "-->" (model/describe-record receipt)
+                        record-desc "-->" (cr/describe receipt)
                         duration)
           :accepted (log/info "Accepted" record-desc duration)
           :processed (log/info "Processed" record-desc duration)
@@ -159,7 +166,7 @@
            (try
              ;(log/debug "Worker thread" n "processing" (dissoc record :value))
              (let [receipt (processor record)]
-               (t/process-receipt! transport receipt))
+               (t/write-message! transport receipt))
              (catch Exception ex
                (log/error "Routing exception while processing record" record)))
            ;; Currently confirm regardless of exception or not

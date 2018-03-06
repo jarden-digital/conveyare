@@ -1,8 +1,7 @@
 (ns conveyare.transport
   (:require
-   [conveyare.model :as model :refer [TransportRecord]]
    [clojure.core.async :as a]
-   [schema.core :as s]
+   [clojure.spec.alpha :as s]
    [clojure.tools.logging :as log]
    [kinsky.client :as q]
    [kinsky.async :as qa]
@@ -12,7 +11,29 @@
    (org.apache.kafka.common.errors WakeupException)
    (org.apache.kafka.clients.consumer CommitFailedException)))
 
-(def record-checker (s/checker TransportRecord))
+(s/def ::topic string?)
+
+(s/def ::key string?)
+
+(s/def ::body string?)
+
+(s/def ::produce boolean?)
+
+(s/def ::partition number?)
+
+(s/def ::offset number?)
+
+(s/def ::write-map
+  (s/keys :req [::topic ::body]
+          :opt [::key ::produce]))
+
+(s/def ::read-map
+  (s/keys :req [::topic ::body]
+          :opt [::key ::partition ::offset]))
+
+(s/def ::setup
+  (s/keys :req [::concurrency]
+          :opt []))
 
 (defn safe-poll! [driver t]
   (try
@@ -96,12 +117,10 @@
       (loop [record (a/<! msgs-out)]
         (when record
           (try
-            (let [checks (record-checker record)]
-              (if (nil? checks)
-                (do
-                  (log/debug "Sending" (model/describe-record record))
-                  (a/>! in (assoc record :op :record)))
-                (log/warn "Can't send invalid record" (model/describe-record record) checks)))
+            ;; TODO convert write-map to thing necessary for kafka
+            (if (s/valid? ::write-map record)
+              (a/>! in (assoc record :op :record))
+              (log/warn "Can't send invalid record" (s/explain-str ::write-map record) record))
             (catch Exception ex
               (log/error ex "Exception occured in producer for record" record)))
           (recur (a/<! msgs-out)))))
@@ -186,48 +205,51 @@
 
 (defn start
   "Start the transport system"
-  [{:keys [transport topics topic-ops handler]}]
-  (log/info "Starting transport" transport)
-  (let [concurrency (get transport :concurrency 5)
-        max-outstanding (* concurrency 100)
-        producer (create-producer transport)
-        consumers (for [topic topics]
-                    [topic (create-consumer transport topic)])
-        control-chan (a/chan concurrency)
-        offsets (atom {})
-        out-chan (a/merge (map #(:chan (second %)) consumers)
-                          concurrency)]
-    (a/go ; drain control messages for offsets
-      (loop [sync (a/timeout 5000)]
-        (let [[message ch] (a/alts! [control-chan sync])]
-          (cond
-            (or (= sync ch)
-                (= :commit (:type message)))
-            (let [current-offsets @offsets]
-              (doseq [[topic consumer] consumers]
-                (let [driver (:driver consumer)
-                      offsets (topic-offsets
-                               (select-keys current-offsets
-                                            [topic]))]
-                  (when (and (seq offsets)
-                             (contains? #{:tracking :auto} (get-in topic-ops [topic :commit-mode] :tracking)))
-                    (log/debug "Commiting offsets" topic offsets)
-                    (a/>! driver {:op :commit
-                                  :topic-offsets offsets}))))
-              (recur (a/timeout 5000)))
+  [setup]
+  (let [transport (::setup setup)
+        topics (:conveyare.core/topic-subscriptions setup)
+        topic-ops (:topic-ops setup)]
+    (log/info "Starting transport" transport)
+    (let [concurrency (get transport ::concurrency 5)
+          max-outstanding (* concurrency 100)
+          producer (create-producer transport)
+          consumers (for [topic topics]
+                      [topic (create-consumer transport topic)])
+          control-chan (a/chan concurrency)
+          offsets (atom {})
+          out-chan (a/merge (map #(:chan (second %)) consumers)
+                            concurrency)]
+      (a/go ; drain control messages for offsets
+        (loop [sync (a/timeout 5000)]
+          (let [[message ch] (a/alts! [control-chan sync])]
+            (cond
+              (or (= sync ch)
+                  (= :commit (:type message)))
+              (let [current-offsets @offsets]
+                (doseq [[topic consumer] consumers]
+                  (let [driver (:driver consumer)
+                        offsets (topic-offsets
+                                 (select-keys current-offsets
+                                              [topic]))]
+                    (when (and (seq offsets)
+                               (contains? #{:tracking :auto} (get-in topic-ops [topic :commit-mode] :tracking)))
+                      (log/debug "Commiting offsets" topic offsets)
+                      (a/>! driver {:op :commit
+                                    :topic-offsets offsets}))))
+                (recur (a/timeout 5000)))
 
-            (some? message)
-            (let [now (System/currentTimeMillis)]
-              (swap! offsets #(update-offset % message now max-outstanding))
-              (recur sync))
+              (some? message)
+              (let [now (System/currentTimeMillis)]
+                (swap! offsets #(update-offset % message now max-outstanding))
+                (recur sync))
 
-            nil
-            (log/debug "Closing control chan")))))
-    {:up true
-     :control control-chan
-     :producer producer
-     :consumers (into {} consumers)
-     :out-chan out-chan}))
+              nil
+              (log/debug "Closing control chan")))))
+      {:up true
+       :control control-chan
+       :producer producer
+       :consumers (into {} consumers)
+       :out-chan out-chan})))
 
 (defn stop
   "Stop the transport system"
@@ -259,12 +281,10 @@
   [this]
   (a/>!! (:control this) {:type :commit}))
 
-(defn process-receipt!
-  "Process a receipt and send an outgoing message via transport if required"
-  [this receipt]
-  (when (:produce receipt)
-    (let [c (get-in this [:producer :chan])
-          transport-record (select-keys receipt [:value :topic :key])]
-      (if c
-        (a/>!! c transport-record)
-        (log/error "Failed to send message, transport not available")))))
+(defn write-message!
+  "Process a write-map and send an outgoing message via transport if required"
+  [this write-map]
+  (when (::produce write-map)
+    (if-let [c (get-in this [:producer :chan])]
+      (a/>!! c write-map)
+      (log/error "Failed to send message, transport not available"))))
