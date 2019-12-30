@@ -184,6 +184,25 @@
     {:driver ctl
      :chan msgs-in}))
 
+(defn priority-merge
+  "Takes a collection of source channels and returns a channel which
+  contains all values taken from them, with channels drained in order
+  (priority given to first channel in list). The returned channel will be
+  unbuffered by default, or a buf-or-n can be supplied. The channel
+  will close after all the source channels have closed."
+  ([chs] (priority-merge chs nil))
+  ([chs buf-or-n]
+   (let [out (a/chan buf-or-n)]
+     (a/go-loop [cs (vec chs)]
+       (if (pos? (count cs))
+         (let [[v c] (a/alts! cs :priority true)]
+           (if (nil? v)
+             (recur (filterv #(not= c %) cs))
+             (do (a/>! out v)
+                 (recur cs))))
+         (a/close! out)))
+     out)))
+
 (defn start
   "Start the transport system"
   [{:keys [transport topics topic-ops handler]}]
@@ -195,7 +214,7 @@
                     [topic (create-consumer transport topic)])
         control-chan (a/chan concurrency)
         offsets (atom {})
-        out-chan (a/merge (map #(:chan (second %)) consumers)
+        out-chan (priority-merge (map #(:chan (second %)) consumers)
                           concurrency)]
     (a/go ; drain control messages for offsets
       (loop [sync (a/timeout 5000)]
